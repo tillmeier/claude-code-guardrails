@@ -1,0 +1,51 @@
+# sync-commands.conf — site config for sync-commands.sh. Plain bash, sourced by the script.
+# Copy to sync-commands.conf (gitignored: it names your hosts) and edit.
+
+# Hostnames as they appear in your SSH config (or DNS). Unreachable hosts are skipped by the
+# pre-flight check, but a permanently dead entry trains you to ignore the ✗ line — remove it.
+SERVERS=(
+  prod-a
+  prod-b
+  # staging
+)
+
+# Commands to push (single .md files under $LOCAL_CLAUDE_DIR/commands/).
+COMMANDS=(
+  plan.md
+  implement.md
+  verify.md
+  crosscheck.md
+  save-learnings-to-docs.md
+  cleanup-docs.md
+)
+
+# Skills to push (whole directories under $LOCAL_CLAUDE_DIR/skills/<name>/). No --delete on
+# the remote side, so per-server extras survive.
+SKILLS=(
+)
+
+# Standalone helpers that commands invoke (under $LOCAL_CLAUDE_DIR/scripts/). They must travel
+# with the command that calls them, or the command fails silently on the server.
+SCRIPTS=(
+)
+
+# Output styles (single .md files under $LOCAL_CLAUDE_DIR/output-styles/).
+OUTPUT_STYLES=(
+  terse.md
+)
+# The one style to ACTIVATE remotely ("outputStyle" in the remote settings.json). The file alone
+# changes nothing. Must match the style's frontmatter `name:` — terse.md declares `name: Terse`.
+# Leave empty to ship the files and switch nothing.
+ACTIVE_STYLE_NAME="Terse"
+ACTIVE_STYLE_FILE="terse.md"
+
+# Files that legitimately live on the servers without being managed here. --check tolerates them
+# instead of warning forever. Keep it EMPTY unless you can write the reason next to the entry.
+ALLOWED_UNMANAGED=(
+)
+
+# The ~/.claude trees on each side. LOCAL_CLAUDE_DIR may point at a checkout of the plugin repo —
+# its commands/ and output-styles/ layout matches. On the servers Claude Code usually runs as root.
+LOCAL_CLAUDE_DIR="$HOME/.claude"
+REMOTE_CLAUDE_DIR="/root/.claude"
+SSH_TIMEOUT=3

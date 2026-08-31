@@ -1,0 +1,24 @@
+{
+  "name": "tillmeier",
+  "owner": {
+    "name": "Till Meier",
+    "url": "https://github.com/tillmeier"
+  },
+  "metadata": {
+    "description": "Till Meier's Claude Code plugins",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "guardrails",
+      "description": "Guardrail hooks, a plan → implement → verify → crosscheck loop, doc-tiering commands and a terse output style for Claude Code.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Till Meier"
+      },
+      "source": "./",
+      "category": "productivity",
+      "keywords": ["hooks", "guardrails", "git", "workflow", "verification"]
+    }
+  ]
+}

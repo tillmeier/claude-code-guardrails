@@ -1,0 +1,22 @@
+{
+  "name": "guardrails",
+  "version": "0.1.0",
+  "description": "Guardrail hooks for Claude Code (git staging guard, SQL guard, session-start marker, pre-compaction handoff, project formatter), a plan → implement → verify → crosscheck delivery loop, doc-tiering commands, a terse output style, and a fleet sync with drift audit.",
+  "author": {
+    "name": "Till Meier",
+    "url": "https://github.com/tillmeier"
+  },
+  "homepage": "https://github.com/tillmeier/claude-code-guardrails",
+  "repository": "https://github.com/tillmeier/claude-code-guardrails",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "hooks",
+    "guardrails",
+    "git",
+    "workflow",
+    "verification",
+    "documentation"
+  ],
+  "outputStyles": "./output-styles/"
+}
