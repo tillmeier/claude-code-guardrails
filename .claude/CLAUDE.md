@@ -1,6 +1,8 @@
 # claude-code-guardrails
 
 Public plugin repo. Read this before changing anything; the README covers what the files do.
+This file lives in `.claude/` on purpose: Claude Code loads it for checkouts of this repo, while a
+root-level `CLAUDE.md` is not loaded for plugin users and trips `claude plugin validate --strict`.
 
 ## Where changes come from
 
@@ -20,7 +22,8 @@ Public plugin repo. Read this before changing anything; the README covers what t
 - `bats tests/` green (bats-core; CI runs the same suite on ubuntu). A hook change without a test
   change is suspicious.
 - The maintainer's scrub grep (term list is private, ask for it to be run) must return nothing.
-  Never add hostnames, IPs, client or product names, SSH aliases, or `/Users/...` paths.
+  Never add hostnames, IPs, client or product names, SSH aliases, or home-directory absolute
+  paths.
 - `claude plugin validate --strict .claude-plugin/plugin.json` and `claude plugin tag .` must pass;
   `plugin.json` and `marketplace.json` versions must agree. Tags are `guardrails--vX.Y.Z`.
 
