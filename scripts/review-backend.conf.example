@@ -1,0 +1,24 @@
+# review-backend.conf — site config for review-backend.sh. Plain bash, sourced by the script.
+# Copy to ~/.claude/review-backend.conf (durable across plugin updates) or next to the script as
+# review-backend.conf (gitignored). Precedence: command-line flag > environment > this file > built-in default.
+
+# Which reviewer to use: codex | claude | custom. Empty = auto-detect in this order:
+# REVIEW_CUSTOM_CMD set → custom; codex on PATH and logged in → codex; claude on PATH → claude.
+# A backend named here that is not available is an error (exit 3) — never a silent substitute.
+REVIEWER=""
+
+# Model pins. Pin explicitly: a vendor default can be deprecated or unavailable on your account
+# without warning, and a review that silently ran on a fallback model is worse than none.
+CODEX_REVIEW_MODEL="gpt-5.6-sol"
+CLAUDE_REVIEW_MODEL="claude-opus-5"
+
+# Tool-turn cap for the claude reviewer (it may read files to confirm a suspicion; never writes).
+CLAUDE_REVIEW_MAX_TURNS=30
+
+# Custom reviewer: a command line run with `bash -c`. It receives the assembled prompt on stdin
+# and must print the review on stdout (JSON matching scripts/review-findings.schema.json, or
+# plain text). Non-zero exit = review failed. Environment available to it:
+#   REVIEW_SCOPE (working-tree | base), REVIEW_BASE (commit, or empty), REVIEW_REPO_ROOT,
+#   REVIEW_SCHEMA (path to the schema file), REVIEW_FOCUS (user focus text, or empty).
+# Example: REVIEW_CUSTOM_CMD='my-reviewer --schema "$REVIEW_SCHEMA"'
+REVIEW_CUSTOM_CMD=""

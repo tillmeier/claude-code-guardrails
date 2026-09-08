@@ -1,5 +1,6 @@
-# Real fleet config names your hosts — only the .example ships.
+# Real site configs name your hosts / pin your models — only the .example files ship.
 scripts/sync-commands.conf
+scripts/review-backend.conf
 
 # Runtime state the hooks/commands produce
 handoffs/

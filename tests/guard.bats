@@ -219,6 +219,48 @@ new_repo() {  # $1 = name; leaves you inside a fresh repo with one commit
   [ "$status" -eq 0 ]; [ -z "$(ls "$BATS_TEST_TMPDIR" | grep evil || true)" ]
 }
 
+@test "session-start: snapshots dirty paths and their blobs (rename → new path, deleted → no blob); clean tree → empty files" {
+  new_repo ss4
+  printf 'v1\n' > tracked.txt; printf 'r\n' > old-name.txt; printf 'gone\n' > doomed.txt
+  git add tracked.txt old-name.txt doomed.txt; git commit -qm add
+  printf 'v2\n' > tracked.txt; printf 'new\n' > untracked.txt; mkdir -p sub; printf 'x\n' > sub/deep.txt
+  git mv old-name.txt new-name.txt; rm doomed.txt
+  printf 'SECRET\n' > "$BATS_TEST_TMPDIR/outside4.txt"; ln -s "$BATS_TEST_TMPDIR/outside4.txt" link.txt   # untracked symlink
+  run env TMPDIR="$BATS_TEST_TMPDIR" bash -c "printf '%s' '{\"session_id\":\"test-sid-4\",\"cwd\":\"$PWD\"}' | bash '$START'"
+  [ "$status" -eq 0 ]
+  d="$BATS_TEST_TMPDIR/claude-session-start-dirty-test-sid-4"; b="$BATS_TEST_TMPDIR/claude-session-start-blobs-test-sid-4"
+  [ "$(sort "$d" | tr '\n' ' ')" = "doomed.txt link.txt new-name.txt sub/deep.txt tracked.txt untracked.txt " ]
+  sha=$(git hash-object tracked.txt)
+  grep -q "^${sha}"$'\t'"tracked.txt\$" "$b"
+  grep -q "^$(git hash-object sub/deep.txt)"$'\t'"sub/deep.txt\$" "$b"   # pairing stays aligned past the deleted file
+  ! grep -q doomed "$b"; ! grep -q link.txt "$b"                          # deleted: no blob; symlink: never hashed
+  [ "$(wc -l < "$b" | tr -d ' ')" -eq 4 ]
+  git cat-file -e "$sha"      # written to the object db (-w), so a later `git diff <sha> <sha>` resolves
+  # clean tree: both files exist and are empty — "hook ran, nothing was dirty" is distinguishable from "no hook"
+  rm link.txt; git add tracked.txt untracked.txt sub/deep.txt; git rm -q doomed.txt; git commit -qm all
+  run env TMPDIR="$BATS_TEST_TMPDIR" bash -c "printf '%s' '{\"session_id\":\"test-sid-5\",\"cwd\":\"$PWD\"}' | bash '$START'"
+  [ "$status" -eq 0 ]
+  d="$BATS_TEST_TMPDIR/claude-session-start-dirty-test-sid-5"; b="$BATS_TEST_TMPDIR/claude-session-start-blobs-test-sid-5"
+  [ -f "$d" ] && [ ! -s "$d" ]; [ -f "$b" ] && [ ! -s "$b" ]
+}
+
+@test "session-start: a re-fire for the same session id (compact / resume) keeps the original baseline" {
+  new_repo ss6
+  first=$(git rev-parse HEAD)
+  printf 'pre\n' > pre.txt
+  envf="$BATS_TEST_TMPDIR/env6"; : > "$envf"
+  run env TMPDIR="$BATS_TEST_TMPDIR" CLAUDE_ENV_FILE="$envf" bash -c "printf '%s' '{\"session_id\":\"test-sid-6\",\"cwd\":\"$PWD\",\"source\":\"startup\"}' | bash '$START'"
+  [ "$status" -eq 0 ]
+  # the session then edits and commits; a compaction re-fires the hook with the same id
+  printf 'edited\n' > pre.txt; printf 'later\n' > later.txt; git add later.txt; git commit -qm later
+  run env TMPDIR="$BATS_TEST_TMPDIR" CLAUDE_ENV_FILE="$envf" bash -c "printf '%s' '{\"session_id\":\"test-sid-6\",\"cwd\":\"$PWD\",\"source\":\"compact\"}' | bash '$START'"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/claude-session-start-commit-test-sid-6")" = "$first" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/claude-session-start-dirty-test-sid-6")" = "pre.txt" ]          # later.txt not added
+  grep -q "^$(printf 'pre\n' | git hash-object --stdin)"$'\t'"pre.txt\$" "$BATS_TEST_TMPDIR/claude-session-start-blobs-test-sid-6"   # original content, not "edited"
+  [ "$(grep -c "^CLAUDE_SESSION_START_COMMIT=$first\$" "$envf")" -eq 2 ]   # re-exported for the new process, same value
+}
+
 # ───────────────────────────── precompact-handoff ─────────────────────────────
 
 @test "precompact: snapshots branch, dirty files and the newest plan into the handoff file" {
@@ -277,6 +319,28 @@ for c in cmds:
     assert os.path.isfile(p), "missing " + p
 assert set(h["hooks"]) == {"SessionStart", "PreToolUse", "PostToolUse", "PreCompact"}, sorted(h["hooks"])
 PY
+}
+
+@test "wiring: no \$<digit> anywhere in commands/*.md — the harness substitutes positional arguments there" {
+  python3 - "$ROOT" <<'PY'
+import glob, os, re, sys
+root = sys.argv[1]; bad = []
+for f in sorted(glob.glob(os.path.join(root, "commands", "*.md"))):
+    for i, line in enumerate(open(f), 1):
+        if re.search(r"\$[0-9]", line):
+            bad.append("%s:%d: %s" % (os.path.relpath(f, root), i, line.rstrip()))
+assert not bad, "\n".join(bad)
+PY
+}
+
+@test "wiring: review-backend.conf.example is sourceable and names every key the script reads; the schema is valid JSON" {
+  bash -n "$ROOT/scripts/review-backend.conf.example"
+  ( . "$ROOT/scripts/review-backend.conf.example" )
+  for k in REVIEWER CODEX_REVIEW_MODEL CLAUDE_REVIEW_MODEL CLAUDE_REVIEW_MAX_TURNS REVIEW_CUSTOM_CMD; do
+    grep -q "^$k=" "$ROOT/scripts/review-backend.conf.example"
+    grep -q "$k" "$ROOT/scripts/review-backend.sh"
+  done
+  python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); assert s["required"]==["verdict","summary","findings"], s["required"]' "$ROOT/scripts/review-findings.schema.json"
 }
 
 @test "wiring: plugin.json and marketplace.json agree on name and version" {

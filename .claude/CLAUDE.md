@@ -10,7 +10,12 @@ root-level `CLAUDE.md` is not loaded for plugin users and trips `claude plugin v
   scrubbed downstream of it: `hooks/git-staging-guard.sh`, `precompact-handoff.sh`,
   `session-start.sh` (private name: `session-start-hook.sh`), `format-file.sh`,
   `scripts/sync-commands.sh`, all of `commands/`, `output-styles/terse.md` and `docs/` have a
-  private twin. Public-only: `sql-guard.sh`, `hooks.json`, the manifests, `tests/`, CI, README.
+  private twin. Public-only: `sql-guard.sh`, `hooks.json`, the manifests, `tests/`, CI, README,
+  and the reviewer adapter (`scripts/review-backend.sh`, its `.conf.example`, the findings schema).
+- `commands/critical-review.md` is a port, not a copy: the private twin stays pinned to the Codex
+  plugin by design, the public one calls `scripts/review-backend.sh`. Port review-logic changes
+  (scope, brief, filtering, findings format) in both directions; do not port the backend abstraction
+  back unless the maintainer says so.
 - Improvements to a file with a private twin are ported in both directions on purpose — a
   drift check on the private side flags when either side moved. Fix here freely, but say in the
   commit message what needs porting back.
@@ -45,9 +50,14 @@ root-level `CLAUDE.md` is not loaded for plugin users and trips `claude plugin v
   groups.
 - Commands must degrade explicitly when an optional dependency is absent (`--codex` without the
   Codex plugin, `--ui` without a browser MCP): say so and continue, never pretend.
-- `commands/verify.md` reads the session base commit from
-  `${TMPDIR:-/tmp}/claude-session-start-commit-${CLAUDE_SESSION_ID}` written by
-  `hooks/session-start.sh`; keep the two in sync.
+- `commands/verify.md` and `commands/critical-review.md` read the session files
+  `${TMPDIR:-/tmp}/claude-session-start-{commit,dirty,blobs}-${CLAUDE_SESSION_ID}` written by
+  `hooks/session-start.sh`; keep the three in sync. `${CLAUDE_SESSION_ID}` and
+  `${CLAUDE_PLUGIN_ROOT}` are substituted into command text by the harness — they are NOT
+  environment variables inside Bash calls, so pass them as arguments to anything that needs them.
+- `scripts/review-backend.sh` is the only vendor-specific file: it must never take the brief or any
+  intent as input, never run a backend other than the one named, and never exit 0 without a review.
+  Backend tests use fake `codex`/`claude` executables on PATH — no model calls in `tests/`.
 
 ## Testing a change like a user
 

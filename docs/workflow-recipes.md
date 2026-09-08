@@ -25,6 +25,7 @@ For API, data, cron, generator, DB, business-logic work. Correctness is behavior
 /plan [--codex] "<task>"     # cited spec → (optional external review) → open Qs → approval gate
 /implement                   # execute the spec step by step; verify each; ask; halt on surprise
 /verify                      # final gate: exercise the real flow locally; PASS/FAIL with evidence
+/critical-review             # optional exit gate: independent reviewer on the diff → approve fixes once
 /save-learnings-to-docs      # check ALL related docs: up to date, nothing redundant/missing/outdated
 <commit step>                # stage BY NAME → staged-diff secret grep → commit → push (not in this repo)
 ```
@@ -61,9 +62,10 @@ breakpoints.
   gate and `/verify`'s "ask rather than guess intent." You don't have to type "ask me all open
   questions" anymore; the commands do it.
 - **Trivial, reversible work skips the recipe.** One-file obvious edits don't need a spec or a gate.
-- **An exit-gate review of the *changes* is orthogonal** (mine is a separate Codex-based command,
-  not in this repo). `/plan --codex` reviews the *plan* (entry gate). Use both on high-stakes work,
-  either alone otherwise.
+- **`/critical-review` is the exit-gate review of the *changes*** — an independent reviewer (Codex,
+  Claude or your own command via `scripts/review-backend.sh`) sees the diff without the task brief;
+  you judge its findings against the code and approve fixes once. `/plan --codex` reviews the *plan*
+  (entry gate). Use both on high-stakes work, either alone otherwise.
 - **`/crosscheck` is the after-the-fact audit** — orthogonal to the build spine, works in any
   project. "Audit everything I shipped/optimized recently and haven't cross-checked — runs clean? did
   anything new break? did the fixes work?" Grounds from the session, discovers where each change's
