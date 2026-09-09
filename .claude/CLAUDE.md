@@ -57,7 +57,8 @@ root-level `CLAUDE.md` is not loaded for plugin users and trips `claude plugin v
   environment variables inside Bash calls, so pass them as arguments to anything that needs them.
 - `scripts/review-backend.sh` is the only vendor-specific file: it must never take the brief or any
   intent as input, never run a backend other than the one named, and never exit 0 without a review.
-  Backend tests use fake `codex`/`claude` executables on PATH — no model calls in `tests/`.
+  Backend tests use fake `codex`/`claude` executables on PATH — no model calls in `tests/`. Design
+  decisions, CLI gotchas and measured timings: `docs/review-backend.md`.
 
 ## Testing a change like a user
 

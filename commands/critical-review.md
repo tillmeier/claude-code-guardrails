@@ -752,7 +752,7 @@ MARK_DIR="${TMPDIR:-/tmp}"
 git rev-parse HEAD > "$MARK_DIR/claude-session-last-review-commit-${CLAUDE_SESSION_ID}"
 BLOBS="$MARK_DIR/claude-session-last-review-blobs-${CLAUDE_SESSION_ID}"; : > "$BLOBS"
 DIRTY=$(git status --porcelain --untracked-files=all | sed -e 's/^...//' -e 's/^.* -> //' | grep -v '^"' | grep .)
-EXISTING=$(printf '%s\n' "$DIRTY" | while IFS= read -r p; do [ -f "$p" ] && printf '%s\n' "$p"; done)
+EXISTING=$(printf '%s\n' "$DIRTY" | while IFS= read -r p; do [ ! -L "$p" ] && [ -f "$p" ] && printf '%s\n' "$p"; done)   # never hash through a symlink
 if [ -n "$EXISTING" ]; then
   SHAS=$(printf '%s\n' "$EXISTING" | git hash-object -w --stdin-paths)
   [ "$(printf '%s\n' "$SHAS" | grep -c .)" -eq "$(printf '%s\n' "$EXISTING" | grep -c .)" ] \

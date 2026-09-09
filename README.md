@@ -172,7 +172,9 @@ against fake `codex`/`claude` executables that record their arguments — no mod
 
 The git guard exists because a chained `git add -A && … && git commit` once swept a parallel
 session's work into a commit. The incident, the approaches that were tried and rejected, and the
-measured hook costs are in [docs/git-staging-safety.md](docs/git-staging-safety.md).
+measured hook costs are in [docs/git-staging-safety.md](docs/git-staging-safety.md). Why the
+reviewer never sees the brief, why `--restricted` and not `--bare`, measured review times, and what
+the reviewers found in this port are in [docs/review-backend.md](docs/review-backend.md).
 
 ## Not included
 
