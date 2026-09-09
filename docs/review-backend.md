@@ -46,6 +46,9 @@ The README says what the pieces do; this is the why and the numbers.
 - An untracked symlink passes `-f`; `cat` on it ships the target to the reviewer and
   `git hash-object -w` writes the target into the object database. Every reader checks `-L` first.
 - A pure deletion is a `+c,0` hunk; no current line overlaps it. Findings on lines `c`/`c+1` count.
+- In `claude -p` with no prompt host, Bash reads of the session files under `$TMPDIR` are denied
+  even with `Bash(cat:*)` allowed (outside the working directory); the command still completes by
+  other means, but costs turns. An interactive session prompts once instead.
 
 ## Measurements
 
@@ -56,7 +59,8 @@ The README says what the pieces do; this is the why and the numbers.
 | codex prompt mode with focus, 1 commit | gpt-5.6-sol | 122 s | schema-valid JSON |
 | codex built-in, 13-file working tree (the port) | gpt-5.6-sol | 226 s / 292 s | two passes |
 | claude backend, same tree, with focus | claude-sonnet-5 | 197 s | schema-valid JSON |
-| nested `claude -p --plugin-dir . "/guardrails:critical-review --review-only"` | Fable 5.1 | 72 s, $0.81 | 19 turns |
+| nested `claude -p --plugin-dir . "/guardrails:critical-review --review-only"`, nothing to review | Fable 5.1 | 72 s, $0.81 | 19 turns |
+| same, `--working-tree` on a planted symlink-guard removal | Fable 5.1 + codex gpt-5.6-sol | 321 s, $0.83 | 42 turns; found it as critical with the right line |
 | bats suite (57 tests, fake backends) | — | ~25 s | bash 5.3 and 3.2 |
 
 ## What the reviewers found in the port itself
