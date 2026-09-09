@@ -1,5 +1,5 @@
 {
-  "description": "Guardrails that fire outside the model's judgment: block bulk git staging and WHERE-less SQL before the Bash call runs (exit 2), record the session-start commit for /verify, snapshot work state before context compaction, and run the project's own formatter (Biome/Prettier/black/php-cs-fixer, only if the project configured one) after every edit.",
+  "description": "Guardrails that fire outside the model's judgment: block bulk git staging and WHERE-less SQL before the Bash call runs (exit 2), record the session-start commit plus a snapshot of already-dirty files for /verify and /critical-review, snapshot work state before context compaction, and run the project's own formatter (Biome/Prettier/black/php-cs-fixer, only if the project configured one) after every edit.",
   "hooks": {
     "SessionStart": [
       {

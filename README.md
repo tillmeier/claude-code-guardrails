@@ -28,8 +28,8 @@ As a plugin (Claude Code ≥ 2.1):
 ```
 
 Restart Claude Code. Hooks are active immediately; commands are namespaced
-(`/guardrails:plan`, `/guardrails:verify`, …); the output style is selectable with
-`/output-style Terse`.
+(`/guardrails:plan`, `/guardrails:verify`, `/guardrails:critical-review`, …); the output style is
+selectable with `/output-style Terse`.
 
 By hand (bare `/plan`, `/verify`, … and control over which hooks run):
 
@@ -39,7 +39,9 @@ cp ~/claude-code-guardrails/commands/*.md      ~/.claude/commands/
 cp ~/claude-code-guardrails/output-styles/*.md ~/.claude/output-styles/
 ```
 
-then wire the hooks you want into `~/.claude/settings.json`:
+then wire the hooks you want into `~/.claude/settings.json`. `/critical-review` looks for its backend
+script at `~/claude-code-guardrails/scripts/review-backend.sh`; for a checkout elsewhere, export
+`REVIEW_BACKEND=<checkout>/scripts/review-backend.sh`. Wire the hooks:
 
 ```json
 "hooks": {

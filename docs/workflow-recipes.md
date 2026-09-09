@@ -5,10 +5,10 @@ paragraph. Composable atoms — fire them in sequence, skip any step that doesn'
 judgment stays yours; the steps stay consistent.
 
 Both recipes share one spine: **align → ask open questions → implement incrementally → verify
-locally → doc-sync → push.** The only things that vary are (a) whether an external reviewer looks
-at the plan (optional) and (b) how you verify. The after-the-fact re-check (did it actually hold in
-prod / at volume?) is a
-separate pass — now its own command, `/crosscheck` (see Notes).
+locally → doc-sync → push.** What varies is (a) whether an external reviewer looks at the plan
+(`/plan --codex`, optional), (b) how you verify, and (c) whether an independent reviewer looks at
+the diff before it ships (`/critical-review`, optional). The after-the-fact re-check (did it actually
+hold in prod / at volume?) is a separate pass — its own command, `/crosscheck` (see Notes).
 
 `/implement` is the execution atom for the middle: it takes an agreed plan (a file, a `/plan` spec,
 or the proposal in chat) and runs it one step at a time — verify each step, ask on ambiguity, halt
