@@ -210,8 +210,12 @@ cat "${TMPDIR:-/tmp}/claude-session-start-dirty-${CLAUDE_SESSION_ID}" 2>/dev/nul
 cat "${TMPDIR:-/tmp}/claude-session-start-blobs-${CLAUDE_SESSION_ID}" 2>/dev/null   # <sha>TAB<path> at session start
 ```
 
-**Baseline for uncommitted files.** If Step C chose `REVIEW_BASE = MARKER` (a review already ran in
-this session) and `claude-session-last-review-blobs-<sid>` exists, that file is the baseline: its
+**Baseline for uncommitted files (default mode only).** In the explicit modes (`--working-tree`,
+`--base`, `--session`, `--since`, `--feature`, `--final`) every uncommitted change is in scope as it
+stands — the user asked for the range, not for this session's share of it — so skip the baseline
+logic and take `git diff HEAD -- <file>` for each file. In default mode: if Step C chose
+`REVIEW_BASE = MARKER` (a review already ran in this session) and
+`claude-session-last-review-blobs-<sid>` exists, that file is the baseline: its
 paths are the "dirty list" and its shas the "then" content — a second review then covers only what
 changed since the first, committed or not. Otherwise the baseline is the session-start pair
 (`…-dirty-<sid>` / `…-blobs-<sid>`).
