@@ -135,6 +135,10 @@ rule?* If yes, cut it.
 - Path-specific "always do X when editing Y" prose in CLAUDE.md → `.claude/rules/` with `paths:`
 - A multi-step procedure in CLAUDE.md → a skill
 - A rule that must hold every time and needs no judgment → a hook (CLAUDE.md is advisory)
+- A `.claude/rules/` file whose entries have grown into paragraphs → split it MECHANICALLY: keep one bold
+  imperative + `[§N]` per rule, move each entry verbatim to `.claude/docs/rules-stories-<file>.md` under `## §N`,
+  prove losslessness by grepping every original line into rule ∪ story. Measured on one project 2026-09-10:
+  the PHP rule file was 101 KB with 86 % story — loaded on every `app/src` read; rules 195 KB → 46 KB, 0 lines lost.
 - **`@`-imports used to "shrink" CLAUDE.md** → they load at launch and don't reduce context; replace
   with a one-line pointer and hoist only the facts genuinely needed every session
 - Other teams'/legacy subtrees pulling in nested CLAUDE.md you never work in → `claudeMdExcludes`,
@@ -188,7 +192,13 @@ Same checks as above, plus:
 for t in "2026-07-15" "!3889" "serve-410.php" "validate_timestamps"; do
   grep -qF -- "$t" SURVIVOR.md || echo "MISSING: $t"
 done
+#    ⚠ Run the loop under `bash <<'HEREDOC' … HEREDOC` when SURVIVOR holds several paths — the tool shell
+#    is zsh, which does NOT word-split `$SURVIVORS`: grep gets one nonexistent filename and EVERY token
+#    reports MISSING (8/8 groups false on 2026-09-10). Keep a positive control (a token you know is there).
 # 3. Append everything still MISSING to the survivor FIRST. Then, and only then, cut.
+#    If you append the whole block verbatim and it carries a figure you have just measured as WRONG,
+#    correct it INSIDE the block (old value in parentheses). A correction note above a stale line is a
+#    contradiction, not a fix — the reviewer flagged exactly two of those after the 2026-09-10 run.
 ```
 
 This is not optional ceremony: on the last run, 9 facts existed **only** in the text being shrunk and
