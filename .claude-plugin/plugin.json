@@ -1,6 +1,6 @@
 {
   "name": "guardrails",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Guardrail hooks for Claude Code (git staging guard, SQL guard, session-start marker, pre-compaction handoff, project formatter), a plan \u2192 implement \u2192 verify \u2192 crosscheck delivery loop, a /critical-review exit gate with a pluggable read-only reviewer (Codex, Claude or your own command), doc-tiering commands, a terse output style, and a fleet sync with drift audit.",
   "author": {
     "name": "Till Meier",
