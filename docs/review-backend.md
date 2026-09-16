@@ -50,6 +50,8 @@ The README says what the pieces do; this is the why and the numbers.
 - An untracked symlink passes `-f`; `cat` on it ships the target to the reviewer and
   `git hash-object -w` writes the target into the object database. Every reader checks `-L` first.
 - A pure deletion is a `+c,0` hunk; no current line overlaps it. Findings on lines `c`/`c+1` count.
+- bash 3.2 with `set -u` treats an empty array as unbound: `"${arr[@]}"` aborts the script. Optional
+  argv is expanded as `${arr[@]+"${arr[@]}"}`; the bats suite runs under `/bin/bash` too, so this is caught.
 - In `claude -p` with no prompt host, Bash reads of the session files under `$TMPDIR` are denied
   even with `Bash(cat:*)` allowed (outside the working directory); the command still completes by
   other means, but costs turns. An interactive session prompts once instead.

@@ -136,7 +136,9 @@ rule?* If yes, cut it.
 - A multi-step procedure in CLAUDE.md → a skill
 - A rule that must hold every time and needs no judgment → a hook (CLAUDE.md is advisory)
 - A `.claude/rules/` file whose entries have grown into paragraphs → split it MECHANICALLY: keep one bold
-  imperative + `[§N]` per rule, move each entry verbatim to `.claude/docs/rules-stories-<file>.md` under `## §N`,
+  imperative + `[§N]` per rule and one header line in the rule file naming the story file
+  (`Stories: .claude/docs/rules-stories-<file>.md` — a path-scoped rule loads alone, so `[§N]` without it is a
+  dead reference), move each entry verbatim to `.claude/docs/rules-stories-<file>.md` under `## §N`,
   prove losslessness by grepping every original line into rule ∪ story — **that grep proves the STORY, not the
   kernel**: a paraphrased kernel passes it trivially, so spot-read ≥5 kernels against their §-stories before
   reporting (second project 2026-09-13: 85 rules, 169.8 → 60.1 KB, 170 → 116 directives; size sections on `##`

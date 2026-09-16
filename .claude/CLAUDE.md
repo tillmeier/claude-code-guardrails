@@ -34,7 +34,8 @@ root-level `CLAUDE.md` is not loaded for plugin users and trips `claude plugin v
 
 ## Conventions the code cannot show
 
-- Target is bash 3.2 (macOS default): no associative arrays, no `${var,,}`, no `mapfile`.
+- Target is bash 3.2 (macOS default): no associative arrays, no `${var,,}`, no `mapfile`; under
+  `set -u` an empty array is "unbound", so expand optional argv as `${arr[@]+"${arr[@]}"}`.
   Dependencies stay at bash, git, python3.
 - Hook exit codes: only exit 2 blocks a tool call and shows stderr to the model; exit 1 is a
   non-blocking notice and the call proceeds. Tests assert the code, not the message.
