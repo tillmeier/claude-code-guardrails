@@ -25,7 +25,11 @@ The README says what the pieces do; this is the why and the numbers.
   SessionStart hook did not fire.
 - **Models are pinned.** The Codex built-in reviewer once fell back to a deprecated model that the
   account was not entitled to, and failed. Pins live in a gitignored conf; defaults ship in the
-  script and in `review-backend.conf.example`.
+  script and in `review-backend.conf.example`. Same for the codex reasoning effort (2026-09-16):
+  `codex exec review` has no `--effort` flag, so an unpinned run takes `~/.codex/config.toml` or,
+  absent that, the model default — low for gpt-5.6-sol. The script passes
+  `-c model_reasoning_effort=<pin>` on both codex paths; verified that the override shows in the run
+  header and that an invalid value fails the request instead of falling back.
 - **Session snapshot is write-once.** SessionStart fires again after a compaction and on resume
   with the same session id; overwriting the markers would move the baseline to "now" and hide the
   session's earlier edits from `/verify` and `/critical-review`.
@@ -61,7 +65,9 @@ The README says what the pieces do; this is the why and the numbers.
 | claude backend, same tree, with focus | claude-sonnet-5 | 197 s | schema-valid JSON |
 | nested `claude -p --plugin-dir . "/guardrails:critical-review --review-only"`, nothing to review | Fable 5.1 | 72 s, $0.81 | 19 turns |
 | same, `--working-tree` on a planted symlink-guard removal | Fable 5.1 + codex gpt-5.6-sol | 321 s, $0.83 | 42 turns; found it as critical with the right line |
-| bats suite (57 tests, fake backends) | — | ~25 s | bash 5.3 and 3.2 |
+| `codex exec review --base HEAD~1` with `-c model_reasoning_effort=high` | gpt-5.6-sol | 188 s | found the bash 3.2 empty-array crash in the effort patch itself |
+| codex prompt mode with focus, effort high, 6-file working tree | gpt-5.6-sol | 93 s | schema-valid JSON, approve |
+| bats suite (58 tests, fake backends) | — | ~25 s | bash 5.3 and 3.2 |
 
 ## What the reviewers found in the port itself
 

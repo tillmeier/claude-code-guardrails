@@ -34,6 +34,7 @@ MAX_UNTRACKED_BYTES=200000
 
 # ── built-in defaults ─────────────────────────────────────────────────────────────────────────────
 DEFAULT_CODEX_MODEL="gpt-5.6-sol"
+DEFAULT_CODEX_EFFORT="high"   # `codex exec review` has no --effort flag; without a pin the model's own default applies
 DEFAULT_CLAUDE_MODEL="claude-opus-5"
 DEFAULT_CLAUDE_MAX_TURNS=30
 
@@ -89,7 +90,9 @@ case "$SCOPE" in ""|working-tree|base) ;; *) die_usage "--scope must be working-
 # ── config: env beats conf, conf beats defaults ───────────────────────────────────────────────────
 ENV_REVIEWER="${REVIEWER:-}"; ENV_CODEX_MODEL="${CODEX_REVIEW_MODEL:-}"; ENV_CLAUDE_MODEL="${CLAUDE_REVIEW_MODEL:-}"
 ENV_CLAUDE_TURNS="${CLAUDE_REVIEW_MAX_TURNS:-}"; ENV_CUSTOM="${REVIEW_CUSTOM_CMD:-}"
+ENV_CODEX_EFFORT_SET=0; ENV_CODEX_EFFORT=""; [ -n "${CODEX_REVIEW_EFFORT+x}" ] && { ENV_CODEX_EFFORT_SET=1; ENV_CODEX_EFFORT="$CODEX_REVIEW_EFFORT"; }
 REVIEWER=""; CODEX_REVIEW_MODEL=""; CLAUDE_REVIEW_MODEL=""; CLAUDE_REVIEW_MAX_TURNS=""; REVIEW_CUSTOM_CMD=""
+CODEX_REVIEW_EFFORT="$DEFAULT_CODEX_EFFORT"   # empty in the conf or the env = leave it to ~/.codex/config.toml
 
 if [ -z "$CONF" ]; then
   for candidate in "${REVIEW_BACKEND_CONF:-}" "$HOME/.claude/review-backend.conf" "$SCRIPT_DIR/review-backend.conf"; do
@@ -106,6 +109,7 @@ fi
 [ -n "$ENV_CLAUDE_MODEL" ] && CLAUDE_REVIEW_MODEL="$ENV_CLAUDE_MODEL"
 [ -n "$ENV_CLAUDE_TURNS" ] && CLAUDE_REVIEW_MAX_TURNS="$ENV_CLAUDE_TURNS"
 [ -n "$ENV_CUSTOM" ]       && REVIEW_CUSTOM_CMD="$ENV_CUSTOM"
+[ "$ENV_CODEX_EFFORT_SET" -eq 1 ] && CODEX_REVIEW_EFFORT="$ENV_CODEX_EFFORT"
 [ -n "$FLAG_BACKEND" ]     && REVIEWER="$FLAG_BACKEND"
 : "${CODEX_REVIEW_MODEL:=$DEFAULT_CODEX_MODEL}"
 : "${CLAUDE_REVIEW_MODEL:=$DEFAULT_CLAUDE_MODEL}"
@@ -266,7 +270,9 @@ trap 'rm -rf "$WORK"' EXIT
 PROMPT_FILE="$WORK/prompt.md"; OUT_FILE="$WORK/review.out"; LOG_FILE="$WORK/backend.log"
 [ "$MODE" = "prompt" ] && build_prompt > "$PROMPT_FILE"
 
-echo "review-backend: ${BACKEND} · ${MODEL} · ${MODE} mode · ${SCOPE_LABEL}" >&2
+EFFORT_ARGS=(); EFFORT_LABEL=""
+if [ "$BACKEND" = codex ] && [ -n "$CODEX_REVIEW_EFFORT" ]; then EFFORT_ARGS=(-c "model_reasoning_effort=$CODEX_REVIEW_EFFORT"); EFFORT_LABEL=" · effort $CODEX_REVIEW_EFFORT"; fi
+echo "review-backend: ${BACKEND} · ${MODEL}${EFFORT_LABEL} · ${MODE} mode · ${SCOPE_LABEL}" >&2
 
 # Runs "$@" with stdin already redirected by the caller; backend chatter goes to LOG_FILE (and to
 # stderr with --verbose). Returns the backend's exit status.
@@ -287,10 +293,10 @@ case "$BACKEND" in
     if [ "$MODE" = "native" ]; then
       if [ "$SCOPE" = "working-tree" ]; then target=(--uncommitted); else target=(--base "$BASE_SHA"); fi
       # </dev/null: `codex exec` reads instructions from stdin when none are given and hangs on a tty.
-      ( cd "$REPO_ROOT" && run_backend codex exec review "${target[@]}" -m "$MODEL" --ephemeral -o "$OUT_FILE" </dev/null ) || STATUS=$?
+      ( cd "$REPO_ROOT" && run_backend codex exec review "${target[@]}" -m "$MODEL" ${EFFORT_ARGS[@]+"${EFFORT_ARGS[@]}"} --ephemeral -o "$OUT_FILE" </dev/null ) || STATUS=$?
     else
       # `-` = read the prompt from stdin; stdin is the prompt file, so nothing waits on a tty.
-      ( cd "$REPO_ROOT" && run_backend codex exec --sandbox read-only --ephemeral -m "$MODEL" \
+      ( cd "$REPO_ROOT" && run_backend codex exec --sandbox read-only --ephemeral -m "$MODEL" ${EFFORT_ARGS[@]+"${EFFORT_ARGS[@]}"} \
           --output-schema "$SCHEMA_FILE" -o "$OUT_FILE" - < "$PROMPT_FILE" ) || STATUS=$?
     fi
     [ $STATUS -eq 0 ] || fail_backend "exit $STATUS"

@@ -10,7 +10,7 @@ setup() {
   export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
   export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"        # no real ~/.claude/review-backend.conf
   export TMPDIR="$BATS_TEST_TMPDIR"
-  unset REVIEWER CODEX_REVIEW_MODEL CLAUDE_REVIEW_MODEL CLAUDE_REVIEW_MAX_TURNS REVIEW_CUSTOM_CMD REVIEW_BACKEND_CONF
+  unset REVIEWER CODEX_REVIEW_MODEL CODEX_REVIEW_EFFORT CLAUDE_REVIEW_MODEL CLAUDE_REVIEW_MAX_TURNS REVIEW_CUSTOM_CMD REVIEW_BACKEND_CONF
   export FAKE_LOG="$BATS_TEST_TMPDIR/fake"; mkdir -p "$FAKE_LOG"
   FAKEBIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$FAKEBIN"
   BARE="/usr/bin:/bin"                                          # git + python3, but no codex / claude
@@ -195,22 +195,37 @@ new_repo() {
   new_repo x1; fake_codex
   run bash "$RB" --base "$BASE"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"review-backend: codex · gpt-5.6-sol · native mode"* ]]
+  [[ "$output" == *"review-backend: codex · gpt-5.6-sol · effort high · native mode"* ]]
   [[ "$output" == *"fake codex review text"* ]]
   argv=$(tr '\n' ' ' < "$FAKE_LOG/codex.argv")
-  [[ "$argv" == "exec review --base $BASE -m gpt-5.6-sol --ephemeral -o "* ]]
+  [[ "$argv" == "exec review --base $BASE -m gpt-5.6-sol -c model_reasoning_effort=high --ephemeral -o "* ]]
   [ ! -s "$FAKE_LOG/codex.stdin" ]                     # </dev/null — nothing can hang on a tty
   run bash "$RB" --scope working-tree
-  argv=$(tr '\n' ' ' < "$FAKE_LOG/codex.argv"); [[ "$argv" == "exec review --uncommitted -m gpt-5.6-sol "* ]]
+  argv=$(tr '\n' ' ' < "$FAKE_LOG/codex.argv"); [[ "$argv" == "exec review --uncommitted -m gpt-5.6-sol -c model_reasoning_effort=high "* ]]
+}
+
+@test "codex: effort pin — conf and env override the default, empty means no -c at all" {
+  new_repo x1e; fake_codex
+  conf="$BATS_TEST_TMPDIR/rb.conf"; printf 'CODEX_REVIEW_EFFORT="xhigh"\n' > "$conf"
+  run bash "$RB" --conf "$conf" --base "$BASE"
+  [ "$status" -eq 0 ]; [[ "$output" == *"gpt-5.6-sol · effort xhigh · native"* ]]
+  argv=$(tr '\n' ' ' < "$FAKE_LOG/codex.argv"); [[ "$argv" == *" -c model_reasoning_effort=xhigh "* ]]
+  run env CODEX_REVIEW_EFFORT=medium bash "$RB" --conf "$conf" --base "$BASE"           # env beats conf
+  argv=$(tr '\n' ' ' < "$FAKE_LOG/codex.argv"); [[ "$argv" == *"=medium "* ]]; [[ "$argv" != *"xhigh"* ]]
+  run env CODEX_REVIEW_EFFORT= bash "$RB" --base "$BASE"                                # empty = codex config decides
+  [ "$status" -eq 0 ]; [[ "$output" == *"codex · gpt-5.6-sol · native mode"* ]]
+  argv=$(tr '\n' ' ' < "$FAKE_LOG/codex.argv"); [[ "$argv" != *"model_reasoning_effort"* ]]
+  run env CODEX_REVIEW_EFFORT=high bash "$RB" --scope working-tree --focus x             # prompt mode carries it too
+  argv=$(tr '\n' ' ' < "$FAKE_LOG/codex.argv"); [[ "$argv" == "exec --sandbox read-only --ephemeral -m gpt-5.6-sol -c model_reasoning_effort=high --output-schema "* ]]
 }
 
 @test "codex: focus text or --mode prompt = read-only 'codex exec' with the schema and the prompt on stdin" {
   new_repo x2; fake_codex
   run env FAKE_CODEX_OUTPUT="$APPROVE" bash "$RB" --scope working-tree --focus 'race conditions'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"codex · gpt-5.6-sol · prompt mode"* ]]; [[ "$output" == *'"verdict":"approve"'* ]]
+  [[ "$output" == *"codex · gpt-5.6-sol · effort high · prompt mode"* ]]; [[ "$output" == *'"verdict":"approve"'* ]]
   argv=$(tr '\n' ' ' < "$FAKE_LOG/codex.argv")
-  [[ "$argv" == "exec --sandbox read-only --ephemeral -m gpt-5.6-sol --output-schema $ROOT/scripts/review-findings.schema.json -o "* ]]
+  [[ "$argv" == "exec --sandbox read-only --ephemeral -m gpt-5.6-sol -c model_reasoning_effort=high --output-schema $ROOT/scripts/review-findings.schema.json -o "* ]]
   [[ "$argv" == *" - " ]]
   grep -q 'Focus: race conditions' "$FAKE_LOG/codex.stdin"; grep -q '+unstaged-marker' "$FAKE_LOG/codex.stdin"
   run bash "$RB" --mode prompt --base "$BASE"

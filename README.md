@@ -135,7 +135,9 @@ refuses with exit 3 and the list of what it checked when nothing is usable. A ba
 explicitly but that is unavailable is also exit 3 — never a silent substitute. Models are pinned in
 `review-backend.conf` (copy `scripts/review-backend.conf.example` to `~/.claude/review-backend.conf`;
 the real file is gitignored): a vendor default can be deprecated or unavailable on your account
-without warning. Prompt-mode output follows `scripts/review-findings.schema.json`.
+without warning. The codex reasoning effort is pinned the same way (`CODEX_REVIEW_EFFORT`, default
+`high`): the built-in reviewer takes no effort flag and the flagship's own default is low.
+Prompt-mode output follows `scripts/review-findings.schema.json`.
 
 The reviewer is deliberately given no way to receive the task brief: framing a change as intended or
 bug-free collapses a reviewer's true-positive rate (arXiv 2603.18740). `/critical-review` writes the

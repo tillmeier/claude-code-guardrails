@@ -12,6 +12,13 @@ REVIEWER=""
 CODEX_REVIEW_MODEL="gpt-5.6-sol"
 CLAUDE_REVIEW_MODEL="claude-opus-5"
 
+# Reasoning effort for the codex reviewer, passed as `-c model_reasoning_effort=<value>` to both the
+# built-in reviewer and prompt mode (`codex exec review` has no --effort flag). Without a pin the run
+# takes ~/.codex/config.toml, and without that the model's own default — low for the current flagship.
+# Values the API accepts: none minimal low medium high xhigh max; a typo fails the run, not silently.
+# Empty = do not pass it, leave it to the codex config.
+CODEX_REVIEW_EFFORT="high"
+
 # Tool-turn cap for the claude reviewer (it may read files to confirm a suspicion; never writes).
 CLAUDE_REVIEW_MAX_TURNS=30
 
