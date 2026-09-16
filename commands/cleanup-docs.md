@@ -137,7 +137,10 @@ rule?* If yes, cut it.
 - A rule that must hold every time and needs no judgment → a hook (CLAUDE.md is advisory)
 - A `.claude/rules/` file whose entries have grown into paragraphs → split it MECHANICALLY: keep one bold
   imperative + `[§N]` per rule, move each entry verbatim to `.claude/docs/rules-stories-<file>.md` under `## §N`,
-  prove losslessness by grepping every original line into rule ∪ story. Measured on one project 2026-09-10:
+  prove losslessness by grepping every original line into rule ∪ story — **that grep proves the STORY, not the
+  kernel**: a paraphrased kernel passes it trivially, so spot-read ≥5 kernels against their §-stories before
+  reporting (second project 2026-09-13: 85 rules, 169.8 → 60.1 KB, 170 → 116 directives; size sections on `##`
+  AND `###` — an awk on `##` alone lumped six subsections into one 9.8 KB "rule"). Measured on one project 2026-09-10:
   the PHP rule file was 101 KB with 86 % story — loaded on every `app/src` read; rules 195 KB → 46 KB, 0 lines lost.
 - **`@`-imports used to "shrink" CLAUDE.md** → they load at launch and don't reduce context; replace
   with a one-line pointer and hoist only the facts genuinely needed every session
