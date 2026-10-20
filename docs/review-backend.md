@@ -42,6 +42,22 @@ The README says what the pieces do; this is the why and the numbers.
   with the same session id; overwriting the markers would move the baseline to "now" and hide the
   session's earlier edits from `/verify` and `/critical-review`.
 
+## v0.3.0: scope helper and event log
+
+- **Scope classification is a shipped script** (`scripts/scope-delta.sh`), not an inline block the
+  model executes: tested as the exact executable, no awk positional-parameter workarounds. One
+  verdict per path; it never answers with an empty diff. Suggested by the Codex plan review.
+- **A failed snapshot lookup is `LIKELY`, not the full diff.** The private copy maps it to the full
+  diff, which claims pre-session lines as this session's; publicly the "scope unverifiable" bucket
+  is a real render path. Untracked new files get a whole-file hunk (`git diff HEAD` prints nothing
+  for them, so their findings could be dropped before).
+- **Every log event after `run` names its run id explicitly**, printed with the review. A
+  session-wide "latest run" pointer credits a late reply about an earlier review to the newest
+  one. `review-log.py` rejects malformed calls and writes nothing; the stats reader counts rows
+  with non-string ids as malformed (the private reader crashed on them).
+- **Rejected:** folding the compaction read-back into `session-start.sh` (separate script keeps
+  the private drift pair 1:1).
+
 ## Gotchas found while building
 
 - `${CLAUDE_SESSION_ID}` and `${CLAUDE_PLUGIN_ROOT}` are substituted into command text by the
@@ -60,6 +76,12 @@ The README says what the pieces do; this is the why and the numbers.
 - A pure deletion is a `+c,0` hunk; no current line overlaps it. Findings on lines `c`/`c+1` count.
 - bash 3.2 with `set -u` treats an empty array as unbound: `"${arr[@]}"` aborts the script. Optional
   argv is expanded as `${arr[@]+"${arr[@]}"}`; the bats suite runs under `/bin/bash` too, so this is caught.
+  (Caveat, found 2026-10-20: under bash 3.2 a failing `[[ … ]]` mid-test does not fail the test —
+  a crash or a `[ … ]` assertion is caught there, a `[[ … ]]` pattern match only on CI's bash 5.)
+- `pipefail` + `producer | grep -q` reads a match as a miss once the input outgrows the pipe buffer
+  (grep exits early, the producer gets SIGPIPE, status 141). In `scope-delta.sh` that turned a
+  pre-dirty file in a 3.4 MB baseline into `FULL` and a 270 KB text diff into `no-text-hunks`;
+  the v0.3.0 release review found it, `tests/review-tools.bats` holds the regression.
 - In `claude -p` with no prompt host, Bash reads of the session files under `$TMPDIR` are denied
   even with `Bash(cat:*)` allowed (outside the working directory); the command still completes by
   other means, but costs turns. An interactive session prompts once instead.
@@ -78,6 +100,9 @@ The README says what the pieces do; this is the why and the numbers.
 | `codex exec review --base HEAD~1` with `-c model_reasoning_effort=high` | gpt-5.6-sol | 188 s | found the bash 3.2 empty-array crash in the effort patch itself |
 | codex prompt mode with focus, effort high, 6-file working tree | gpt-5.6-sol | 93 s | schema-valid JSON, approve |
 | bats suite (58 tests, fake backends) | — | ~25 s | bash 5.3 and 3.2 |
+| `codex exec review --base 34ec8c7`, v0.3.0 (20 files) | gpt-6.1-sol, effort high | — | 1 real finding (the pipefail bug above); re-review of the fix and a third native pass clean |
+| bogus model through the script (`CODEX_REVIEW_MODEL=gpt-bogus-0`) | CLI 0.160.0 | seconds | codex exit 1 → script exit 4, empty stdout |
+| bats suite (78 tests) | — | — | bash 5.3 and 3.2 |
 
 ## What the reviewers found in the port itself
 

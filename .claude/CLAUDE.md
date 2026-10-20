@@ -25,7 +25,8 @@ root-level `CLAUDE.md` is not loaded for plugin users and trips `claude plugin v
 ## Gates before a commit
 
 - `bats tests/` green (bats-core; CI runs the same suite on ubuntu). A hook change without a test
-  change is suspicious.
+  change is suspicious. Under bash 3.2 a failing `[[ … ]]` that is not a test's last line does NOT
+  fail the test — only bash ≥ 4.1 (CI) enforces it; use `[ … ]` for exact matches.
 - The maintainer's scrub grep (term list is private, ask for it to be run) must return nothing.
   Never add hostnames, IPs, client or product names, SSH aliases, or home-directory absolute
   paths.
@@ -37,6 +38,8 @@ root-level `CLAUDE.md` is not loaded for plugin users and trips `claude plugin v
 - Target is bash 3.2 (macOS default): no associative arrays, no `${var,,}`, no `mapfile`; under
   `set -u` an empty array is "unbound", so expand optional argv as `${arr[@]+"${arr[@]}"}`.
   Dependencies stay at bash, git, python3.
+- Under `pipefail`, never `producer | grep -q`: grep exits on the first match, the producer dies of
+  SIGPIPE on large input and the match reads as a miss. Grep the file directly, or match in bash.
 - Hook exit codes: only exit 2 blocks a tool call and shows stderr to the model; exit 1 is a
   non-blocking notice and the call proceeds. Tests assert the code, not the message.
 - Any PreToolUse (Bash) hook fires on every Bash call. It must gate on a pure-bash `case`
