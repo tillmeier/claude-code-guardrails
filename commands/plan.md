@@ -105,7 +105,13 @@ changes before Phase 3, not after you've written the code.
 ## Phase 3: Approval gate
 
 Present the spec inline (the file is the record; the user shouldn't have to open it) and call
-`ExitPlanMode` to get an explicit go/no-go **before touching any product code**.
+`ExitPlanMode` to get an explicit go/no-go **before touching any product code**. If `ExitPlanMode`
+errors because the session is not in plan mode, gate with `AskUserQuestion` instead (recommended
+scope first) — the error is not an approval.
+
+**Open questions carry a guess.** Every question you put to the user — in Phase 1, when folding
+Codex findings, or here — comes as `Q: … GUESS: <your best answer + why>`, one question per
+decision. A wrong guess gets corrected in one word; a bare question costs the user a paragraph.
 
 - **Approved** → implement strictly against the spec. If reality forces a deviation, say so out
   loud and update the spec file — don't silently drift.

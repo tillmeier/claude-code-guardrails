@@ -33,7 +33,7 @@ SCHEMA_FILE="$SCRIPT_DIR/review-findings.schema.json"
 MAX_UNTRACKED_BYTES=200000
 
 # ── built-in defaults ─────────────────────────────────────────────────────────────────────────────
-DEFAULT_CODEX_MODEL="gpt-5.6-sol"
+DEFAULT_CODEX_MODEL="gpt-6.1-sol"   # needs codex CLI >= 0.160 (tested 0.160.0; 0.155 does not know it)
 DEFAULT_CODEX_EFFORT="high"   # `codex exec review` has no --effort flag; without a pin the model's own default applies
 DEFAULT_CLAUDE_MODEL="claude-opus-5"
 DEFAULT_CLAUDE_MAX_TURNS=30

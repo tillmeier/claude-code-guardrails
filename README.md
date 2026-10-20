@@ -8,7 +8,8 @@ from my private config.
 
 - **Hooks** — run outside the model's judgment: block bulk `git add` / `git commit -a` and
   WHERE-less SQL before the Bash call executes, record the session-start commit, snapshot work
-  state before context compaction, run the project's own formatter after edits.
+  state before context compaction and feed it back in right after, run the project's own formatter
+  after edits.
 - **Commands** — a delivery loop (`/plan` → `/implement` → `/verify` → `/critical-review` →
   `/crosscheck`) and doc-maintenance commands (`/save-learnings-to-docs`, `/cleanup-docs`,
   `/refactor-claude-md`, `/init-local-md`).
@@ -45,7 +46,10 @@ script at `~/claude-code-guardrails/scripts/review-backend.sh`; for a checkout e
 
 ```json
 "hooks": {
-  "SessionStart": [{"hooks": [{"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/session-start.sh\""}]}],
+  "SessionStart": [
+    {"hooks": [{"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/session-start.sh\""}]},
+    {"matcher": "compact", "hooks": [{"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/compact-handoff-inject.sh\""}]}
+  ],
   "PreToolUse": [{"matcher": "Bash", "hooks": [
     {"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/sql-guard.sh\"", "timeout": 10},
     {"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/git-staging-guard.sh\"", "timeout": 10}
@@ -68,6 +72,7 @@ own (see [Reviewer backend](#reviewer-backend)). Tests need
 | `sql-guard.sh` | PreToolUse (Bash) | Denies `DROP TABLE/DATABASE`, `TRUNCATE TABLE`, `DELETE FROM t` with no WHERE, on any line of the command |
 | `session-start.sh` | SessionStart | Writes HEAD, the list of already-dirty files and a blob of each one's content to per-session marker files, so `/verify` and `/critical-review` can scope to what this session changed. Write-once per session id: the re-fire after a compaction or resume keeps the original baseline |
 | `precompact-handoff.sh` | PreCompact | Appends branch, last commits, dirty files and the newest plan file to `~/.claude/handoffs/<session>.md` (override dir with `CLAUDE_HANDOFF_DIR`); GC after 14 days |
+| `compact-handoff-inject.sh` | SessionStart (`compact`) | Feeds the last section of that handoff file back into the context right after the compaction (`additionalContext`, capped at 2500 characters); silent for any other start |
 | `format-file.sh` | PostToolUse (Edit\|Write\|MultiEdit) | Runs the nearest Biome/Prettier config (walking up to the git root), else black/ruff/isort/php-cs-fixer if installed, else nothing. Disable with `CLAUDE_NO_FORMAT=1` |
 
 A blocked call exits 2; the tool call never runs and the model gets the stderr as the reason:
@@ -139,6 +144,15 @@ without warning. The codex reasoning effort is pinned the same way (`CODEX_REVIE
 `high`): the built-in reviewer takes no effort flag and the flagship's own default is low.
 Prompt-mode output follows `scripts/review-findings.schema.json`.
 
+Three helpers sit next to it, all plain bash/python3 and tested in `tests/review-tools.bats`:
+`scope-delta.sh` tells `/critical-review` which lines of each changed file are this session's (one
+verdict per file — `FULL`, `DELTA`, `UNCHANGED` or `LIKELY` — so a failed lookup lands in the
+"scope unverifiable" bucket instead of silently dropping findings); `review-log.py` appends the
+review log as immutable events (`run`, `finding`, `decision`, `resolution`, `brief_drop`,
+`brief_drop_overruled`, joined by run id) to `~/.claude/logs/critical-review.jsonl`
+(`CLAUDE_REVIEW_LOG_DIR` overrides); `critical-review-stats.py` reads it — distinct ids, undecided
+findings reported as unresolved, never guessed.
+
 The reviewer is deliberately given no way to receive the task brief: framing a change as intended or
 bug-free collapses a reviewer's true-positive rate (arXiv 2603.18740). `/critical-review` writes the
 brief for itself and applies it only after the review, behind a mandatory re-read of the source.
@@ -166,7 +180,7 @@ exit 2 on findings; `--dry-run` shows what would transfer.
 ## Tests
 
 ```bash
-bats tests/        # 58 tests: guard patterns, SQL guard, formatter, session marker, handoff, reviewer backend, wiring
+bats tests/        # 77 tests: guard patterns, SQL guard, formatter, session marker, handoff + read-back, reviewer backend, review helpers, wiring
 ```
 
 CI runs the same suite on ubuntu; macOS bash 3.2 is the primary target. The backend tests run
@@ -198,8 +212,12 @@ the reviewers found in this port are in [docs/review-backend.md](docs/review-bac
 - `session-start.sh` keys the marker file by session id (`${CLAUDE_SESSION_ID}`) instead of an
   undocumented env-file export, and adds the dirty-file / blob snapshot.
 - `critical-review.md` calls `scripts/review-backend.sh` instead of the Codex plugin's companion
-  script (my copy is pinned to Codex), logs with python3 instead of node, and stops instead of
-  reviewing its own diff when no reviewer is available.
+  script (my copy is pinned to Codex), logs through `scripts/review-log.py` instead of an inline node
+  logger, classifies the session's lines with `scripts/scope-delta.sh` instead of inline awk (a
+  broken snapshot lookup goes to "scope unverifiable" rather than to the full diff), and stops
+  instead of reviewing its own diff when no reviewer is available.
+- `compact-handoff-inject.sh` refuses session ids that are not `[A-Za-z0-9._-]` before building a
+  path from them.
 - `format-file.sh` reads the file path from the hook JSON itself, no `jq` wrapper needed.
 - `sync-commands.sh` config moved to `sync-commands.conf`; `--help` works without one; empty
   `SERVERS` is an error, not a silent no-op.

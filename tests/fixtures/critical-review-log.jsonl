@@ -1,0 +1,34 @@
+{"ts":"2026-08-31T22:00:00.000Z","event":"run","run_id":"S1-1000-1","session":"S1","repo":"alpha","model":"codex gpt-6.1-sol","mode":"review","reviewer_findings":"5","kept":"2"}
+{"ts":"2026-08-31T22:00:01.000Z","event":"finding","run_id":"S1-1000-1","fid":"S1-1000-1-1","session":"S1","repo":"alpha","severity":"P1","file":"a.php","line_start":1,"line_end":2,"issue":"x"}
+{"ts":"2026-08-31T22:00:02.000Z","event":"finding","run_id":"S1-1000-1","fid":"S1-1000-1-2","session":"S1","repo":"alpha","severity":"P2","file":"b.php","line_start":3,"line_end":4,"issue":"y"}
+{"ts":"2026-08-31T22:00:03.000Z","event":"finding","run_id":"S1-1000-1","fid":"S1-1000-1-1","session":"S1","repo":"alpha","severity":"P1","file":"a.php","line_start":1,"line_end":2,"issue":"x (duplicate row)"}
+{"ts":"2026-08-31T22:05:00.000Z","event":"decision","fid":"S1-1000-1-1","decision":"accepted","via":"plan_approval"}
+{"ts":"2026-08-31T22:06:00.000Z","event":"resolution","fid":"S1-1000-1-1","status":"auto_applied","complexity":"trivial"}
+{"ts":"2026-08-31T22:07:00.000Z","event":"decision","fid":"S1-1000-1-2","decision":"declined","via":"pushback","reason":"intended"}
+{"ts":"2026-09-01T08:00:00.000Z","event":"run","run_id":"S1-2000-2","session":"S1","repo":"alpha","model":"claude claude-opus-5","mode":"adversarial-review","codex_findings":"3","kept":"2"}
+{"ts":"2026-09-01T08:00:01.000Z","event":"finding","run_id":"S1-2000-2","fid":"S1-2000-2-1","session":"S1","repo":"alpha","severity":"P2","file":"c.php","line_start":5,"line_end":6,"issue":"same N as run 1, distinct fid"}
+{"ts":"2026-09-01T08:00:02.000Z","event":"finding","run_id":"S1-2000-2","fid":"S1-2000-2-2","session":"S1","repo":"alpha","severity":"P3","file":"d.php","line_start":7,"line_end":8,"issue":"never decided"}
+{"ts":"2026-09-01T08:10:00.000Z","event":"decision","fid":"S1-2000-2-1","decision":"declined","via":"pushback","reason":"first reaction"}
+{"ts":"2026-09-01T08:20:00.000Z","event":"decision","fid":"S1-2000-2-1","decision":"accepted","via":"go_ahead"}
+{"ts":"2026-09-01T08:21:00.000Z","event":"resolution","fid":"S1-2000-2-1","status":"failed","reason":"edit_failed"}
+{"ts":"2026-09-01T08:00:03.000Z","event":"brief_drop","run_id":"S1-2000-2","drop_id":"S1-2000-2-D1","repo":"alpha","file":"e.php","line_start":1,"line_end":1,"issue":"z","brief_excerpt":"do not flag z"}
+{"ts":"2026-09-01T08:00:04.000Z","event":"brief_drop","run_id":"S1-2000-2","drop_id":"S1-2000-2-D2","repo":"alpha","file":"f.php","line_start":1,"line_end":1,"issue":"w","brief_excerpt":"do not flag w"}
+{"ts":"2026-09-01T08:30:00.000Z","event":"brief_drop_overruled","drop_id":"S1-2000-2-D1","reason":"brief was wrong"}
+{"ts":"2026-09-02T09:00:00.000Z","event":"run","run_id":"S2-3000-3","session":"S2","repo":"beta","model":"codex gpt-6.1-sol","mode":"review"}
+{"ts":"2026-09-02T09:00:01.000Z","event":"finding","run_id":"S2-3000-3","fid":"S2-3000-3-1","session":"S2","repo":"beta","severity":"P2","file":"g.py","line_start":9,"line_end":9,"issue":"v"}
+{"ts":"2026-09-02T09:05:00.000Z","event":"decision","fid":"S2-3000-3-1","decision":"accepted","via":"plan_approval"}
+{"ts":"2026-09-02T09:06:00.000Z","event":"resolution","fid":"S2-3000-3-1","status":"skipped","reason":"target_drifted"}
+{not json
+[1,2]
+{"ts":"2026-05-01T10:00:00.000Z","session":"unknown","repo":"old","diff_sha":"abc","severity":"P2","file":"h.php","line_start":1,"line_end":2,"issue":"legacy finding","verdict":null}
+{"ts":"2026-05-01T10:01:00.000Z","event":"auto_applied","session":"unknown","diff_sha":"abc","file":"h.php","line_start":1,"line_end":2,"complexity":"trivial"}
+{"ts":"2026-05-01T10:02:00.000Z","event":"brief_drop","session":"unknown","diff_sha":"abc","file":"i.php","line_start":1,"line_end":1,"issue":"legacy drop","brief_excerpt":"q","verdict":null}
+{"ts":"2026-09-02T09:07:00.000Z","event":"decision","fid":"X-9","decision":"accepted","via":"go_ahead"}
+{"ts":"2026-09-02T09:10:00.000Z","event":"finding","run_id":"S2-3000-3","fid":"S2-3000-3-2","session":"S2","repo":"beta","severity":"P2","file":"k.py","line_start":1,"line_end":1,"issue":"accepted, applied, LATER declined"}
+{"ts":"2026-09-02T09:11:00.000Z","event":"decision","fid":"S2-3000-3-2","decision":"accepted","via":"go_ahead"}
+{"ts":"2026-09-02T09:12:00.000Z","event":"resolution","fid":"S2-3000-3-2","status":"auto_applied","complexity":"trivial"}
+{"ts":"2026-09-02T09:30:00.000Z","event":"decision","fid":"S2-3000-3-2","decision":"declined","via":"pushback","reason":"fix reverted, finding was wrong"}
+{"ts":"2026-09-05T10:00:00Z","session":"s-v02","repo":"old","diff_sha":"abc","severity":"high","file":"j.sh","line_start":1,"line_end":1,"issue":"v0.2 public-shape finding","brief_active":false,"reviewer":"codex gpt-5.6-sol","verdict":null}
+{"ts":"2026-09-05T10:00:01Z","event":"finding","fid":["bad"],"run_id":"S2-3000-3"}
+{"ts":12345,"event":"run","run_id":"R-num"}
+{"ts":"2026-09-05T10:00:02Z","event":7}

@@ -49,6 +49,7 @@ Session files (all keyed by `${CLAUDE_SESSION_ID}`, written under `${TMPDIR:-/tm
 | `claude-session-last-review-commit-<sid>` | this command (Phase 6) | HEAD after the last review in this session |
 | `claude-session-last-review-blobs-<sid>` | this command (Phase 6) | `<blob sha>TAB<path>` of each dirty file's content at that review |
 | `claude-review-brief-<sid>.md` | this command (Phase 1.5) | the conversation brief, never shown to the reviewer |
+| `claude-review-dirty-fallback-<sid>` | this command (Phase 1, only without a snapshot) | the opening gitStatus paths, the dirty list of last resort |
 
 ---
 
@@ -210,42 +211,49 @@ cat "${TMPDIR:-/tmp}/claude-session-start-dirty-${CLAUDE_SESSION_ID}" 2>/dev/nul
 cat "${TMPDIR:-/tmp}/claude-session-start-blobs-${CLAUDE_SESSION_ID}" 2>/dev/null   # <sha>TAB<path> at session start
 ```
 
-**Baseline for uncommitted files (default mode only).** In the explicit modes (`--working-tree`,
-`--base`, `--session`, `--since`, `--feature`, `--final`) every uncommitted change is in scope as it
-stands — the user asked for the range, not for this session's share of it — so skip the baseline
-logic and take `git diff HEAD -- <file>` for each file. In default mode: if Step C chose
-`REVIEW_BASE = MARKER` (a review already ran in this session) and
-`claude-session-last-review-blobs-<sid>` exists, that file is the baseline: its
-paths are the "dirty list" and its shas the "then" content — a second review then covers only what
-changed since the first, committed or not. Otherwise the baseline is the session-start pair
-(`…-dirty-<sid>` / `…-blobs-<sid>`).
+**Which lines are this session's: `scripts/scope-delta.sh`.** One call classifies every uncommitted
+file and prints exactly one verdict per path — a lookup that fails says so instead of returning an
+empty diff (which used to turn every finding in that file into "out of scope"). It sits next to the
+backend script: `SD="$(dirname "$RB")/scope-delta.sh"`. Run it from the repo root with every
+currently uncommitted path (unstaged, staged and untracked, from the lists above):
 
-**Pre-existing dirty files: compute the delta, do not exclude.** For each currently uncommitted file:
+```bash
+SD="<dir of RB>/scope-delta.sh"
+bash "$SD" --dirty "<dirty list>" --blobs "<blobs file>" -- <path> [<path> ...]
+```
 
-1. **Not in the baseline dirty list** → modified only since the baseline → the full current diff
-   (`git diff HEAD -- <file>`) is in scope.
-2. **In the dirty list AND a blob sha exists** → it was dirty before, this session may have added
-   more. Diff the baseline blob against the file now:
+**Baseline (`--dirty` / `--blobs`), default mode only:**
 
-   ```bash
-   BLOBS="${TMPDIR:-/tmp}/claude-session-start-blobs-${CLAUDE_SESSION_ID}"   # or …-last-review-blobs-… (see above)
-   THEN_SHA=$(awk -F'\t' -v f="<file>" '{ if ($NF == f) { print $(NF-1); exit } }' "$BLOBS")
-   NOW_SHA=$(git hash-object -w -- "<file>")        # -w so git diff can resolve it
-   git diff --unified=0 ${THEN_SHA} ${NOW_SHA} 2>/dev/null
-   ```
+- A review already ran in this session (Step C chose `REVIEW_BASE = MARKER`) and
+  `${TMPDIR:-/tmp}/claude-session-last-review-blobs-${CLAUDE_SESSION_ID}` exists → pass only
+  `--blobs <that file>` (its paths are the dirty list). A second review then covers only what changed
+  since the first, committed or not.
+- Otherwise the session-start pair: `--dirty ${TMPDIR:-/tmp}/claude-session-start-dirty-${CLAUDE_SESSION_ID}
+  --blobs ${TMPDIR:-/tmp}/claude-session-start-blobs-${CLAUDE_SESSION_ID}`.
+- Exit 2 (a baseline file does not exist — no snapshot hook ran): write the paths from the "Status:"
+  section of the conversation's opening `gitStatus` message, one per line, to
+  `${TMPDIR:-/tmp}/claude-review-dirty-fallback-${CLAUDE_SESSION_ID}` and re-run with
+  `--dirty <that file> --blobs /dev/null`.
 
-   Only these hunks count for Phase 3 on this file. `THEN_SHA == NOW_SHA` → untouched since the baseline → exclude.
-   The diff header shows the blob shas as paths; store the hunks under the REAL file name. The
-   `@@ -a,b +c,d @@` ranges are line-accurate against the file on disk.
-3. **In the dirty list but no blob sha** (hook older than the snapshot feature, a path git quotes, a
-   file deleted at the time) → add
-   to `LIKELY_IN_SCOPE_FILES`; its findings are tagged `scope=likely` in Phase 3 and rendered under a
-   "Scope unverifiable" header, not dropped. Warn: `⚠ <file>: dirty at session start, no blob snapshot — findings flagged as scope-unverifiable`.
-4. **No dirty snapshot at all** → use the "Status:" section of the conversation's opening `gitStatus`
-   message as the dirty list and treat those files as case 3.
+**Explicit modes** (`--working-tree`, `--base`, `--session`, `--since`, `--feature`, `--final`): every
+uncommitted change is in scope as it stands — the user asked for the range, not for this session's
+share of it — so pass `--dirty /dev/null --blobs /dev/null` (every path comes back `FULL`).
 
-Hard-dropping pre-dirty files would hide real findings on lines this session added; the blob path is
-exact when available, the tag path keeps the user the arbiter otherwise.
+**Verdicts → Phase 3:**
+
+| Verdict | Meaning | Phase 3 |
+|---|---|---|
+| `FULL <path>` + `@@` lines | not dirty at the baseline (incl. untracked new files) | those hunks are in scope |
+| `DELTA <path>` + `@@` lines | dirty at the baseline; only what changed since | ONLY those hunks are in scope |
+| `UNCHANGED <path>` | nothing changed since the baseline | exclude the file |
+| `LIKELY <path> (<reason>)` | this session's share is unprovable | add to `LIKELY_IN_SCOPE_FILES` |
+
+`@@ -a,b +c,d @@` ranges are line-accurate against the file on disk. For every `LIKELY` path warn
+`⚠ <path>: <reason> — findings flagged as scope-unverifiable`; reasons are `not-snapshotted` (dirty
+at the baseline, no blob: hook older than the snapshot, a path git quotes, a file deleted at the
+time), `broken: …` (snapshot sha unusable, file gone, diff failed) and `no-text-hunks` (binary).
+Hard-dropping these would hide real findings on lines this session added; the tag keeps the user the
+arbiter.
 
 ```bash
 # Committed hunks — default mode: per OWN commit, so a commit another session interleaved inside
@@ -259,18 +267,17 @@ Residual: a per-commit hunk carries the line numbers of the file *at that commit
 shift lines above it drift the range. The Phase 4a source re-read is what catches a misattributed
 finding — do not widen a hunk to compensate.
 
-**Pre-dirty file committed in this session.** If an own commit touches a path that is in the
-session-start dirty list with a blob, its per-commit hunks contain the pre-session edits too. For
-that file replace them with the delta from the session-start blob to the file at the newest own
-commit: `git diff --unified=0 <THEN_SHA> $(git rev-parse <CONV_END>:<file>)` (plus the uncommitted
-delta as above, if the file is dirty again).
+**Pre-dirty file committed in this session** (default mode). If an own commit touches a path that is
+in the baseline dirty list, its per-commit hunks contain the pre-session edits too. Replace them with
+`bash "$SD" <same baseline args> --now <CONV_END> -- <path>` — the delta from the baseline blob to the
+file at the newest own commit, same verdicts. If the file is dirty again, its uncommitted verdict
+from the first call comes on top.
 
 **Store the combined hunks and the changed-file lists** for Phase 3: committed (per own commit, or
-`REVIEW_RANGE`), uncommitted clean-HEAD files (`git diff HEAD -- <file>`), pre-dirty files (blob
-delta, committed or not).
+`REVIEW_RANGE`), `FULL` and `DELTA` hunks (committed or not), and `LIKELY_IN_SCOPE_FILES`.
 
-If nothing changed (no own commits AND no uncommitted deltas): "No changes found in this session.
-Nothing to review." and stop.
+If nothing changed — no own commits, and every uncommitted path came back `UNCHANGED` — say "No
+changes found in this session. Nothing to review." and stop. A `LIKELY` path counts as a change.
 
 **Step 4: Mode, file classes, scope summary, confirmation.**
 
@@ -409,8 +416,8 @@ scrutiny ("look hard at the locking"); intent steers away from it.
   one run, `--scope working-tree`.
 - **Case B — only committed changes**: one run, `--base <REVIEW_BASE>`.
 - **Case C — both**: two runs, `--base <REVIEW_BASE>` and `--scope working-tree`; merge the findings
-  and label each with its run. If every uncommitted file was already dirty at session start and the
-  blob deltas are all empty, this is Case B — skip the working-tree run.
+  and label each with its run. If every uncommitted path came back `UNCHANGED` from
+  `scope-delta.sh`, this is Case B — skip the working-tree run (a `LIKELY` path keeps it).
 
 **Invocation** (`RB` = the script path from Phase 0; `REVIEW_MODE` from Step 4a; add
 `--focus "<FOCUS_TEXT>"` only when there is focus text):
@@ -455,7 +462,7 @@ Classify each finding:
 
 1. **strict-in-scope** — `finding.file` is in the changed-file list (committed in `REVIEW_RANGE`, OR
    new uncommitted) AND `line_start..line_end` overlaps a stored hunk for that file. Render normally.
-2. **likely-in-scope** — `finding.file` is in `LIKELY_IN_SCOPE_FILES` (dirty at start, no blob), or the
+2. **likely-in-scope** — `finding.file` is in `LIKELY_IN_SCOPE_FILES` (a `LIKELY` verdict), or the
    finding has no usable line range. Tag `scope=likely`; rendered under "Scope unverifiable"; the user
    is the arbiter.
 3. **out-of-scope** — neither. **DROP**, but record `file:line_start-line_end` + a one-line reason;
@@ -521,66 +528,77 @@ Complexity: **trivial** = single line/block, obvious, no design decision (guard 
 await, typo, missing default). **moderate** = one module, some judgment, no cross-file coordination.
 **complex** = multi-file, architectural, touches invariants or rollout/migration — belongs in `/plan`.
 
-**Step 4b-log — Append each surviving finding to the review log.** Always, on both render paths,
-before rendering. Without this log no future tuning of this command is evidence-based.
+**Step 4b-log — Log this run as events.** Always, on both render paths, before rendering. Without
+the log no future tuning of this command is evidence-based: how many reviewer findings survive the
+filter, how many the user accepts, whether a brief drop ever hid a real bug.
 
-Collect once:
+The log (`${CLAUDE_REVIEW_LOG_DIR:-~/.claude/logs}/critical-review.jsonl`) is a stream of
+**immutable events joined by ids**, written by `scripts/review-log.py` next to the backend script
+(`RL="<dir of RB>/review-log.py"`). Three rules:
 
-```bash
-REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
-DIFF_SHA=$(git rev-parse HEAD 2>/dev/null || echo "uncommitted")
-BRIEF_FILE="${TMPDIR:-/tmp}/claude-review-brief-${CLAUDE_SESSION_ID}.md"
-BRIEF_ACTIVE=$([ -f "$BRIEF_FILE" ] && echo 1 || echo 0)
-```
+- **Nobody patches rows by hand.** What the user decides is logged as its own event at the moment
+  this command sees the decision. (A `verdict` field for the user to fill in later was the v0.2
+  design; in the maintainer's log it was filled for 5 of ~2,000 findings.)
+- **No event = unresolved.** Never infer a decision. An approved plan is a decision; a fix that was
+  *executed* is a resolution; neither says the finding was *correct* — keep the three apart.
+- **Ids, not positions.** `N` restarts with every review, and one session can run several, so every
+  event names the `run_id` of the review it belongs to.
 
-Then one append per surviving finding (argv order: repo root, diff sha, severity, file, line_start,
-line_end, issue, brief_active, backend/model, session id; `issue` < 200 chars, no newlines):
-
-```bash
-python3 - "$REPO_ROOT" "$DIFF_SHA" "<severity>" "<file>" "<line_start>" "<line_end>" "<issue — one short sentence>" "$BRIEF_ACTIVE" "<BACKEND> <MODEL>" "${CLAUDE_SESSION_ID}" <<'PY'
-import json, os, sys, time
-a = sys.argv[1:]
-log_dir = os.environ.get("CLAUDE_REVIEW_LOG_DIR") or os.path.join(os.path.expanduser("~"), ".claude", "logs")
-os.makedirs(log_dir, exist_ok=True)
-entry = {
-    "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    "session": a[9] or "unknown",
-    "repo": os.path.basename(a[0]) if a[0] else "unknown",
-    "diff_sha": a[1], "severity": a[2], "file": a[3],
-    "line_start": int(a[4]), "line_end": int(a[5]), "issue": a[6],
-    "brief_active": a[7] == "1", "reviewer": a[8], "verdict": None,
-}
-with open(os.path.join(log_dir, "critical-review.jsonl"), "a") as fh:
-    fh.write(json.dumps(entry) + "\n")
-PY
-```
-
-Also log each `intentional-by-conversation` drop (the brief-precision dataset — "did the brief ever
-hide a real bug?"), argv: diff sha, file, line_start, line_end, issue, triggering brief line, session id:
+**1. One `run` event** — prints the run id; keep it as `RUN_ID`, it goes into the rendered output
+(Step 4c) so a later reply can name the review it answers. Log it **even with zero surviving
+findings** — runs are the denominator.
 
 ```bash
-python3 - "$DIFF_SHA" "<file>" "<line_start>" "<line_end>" "<issue>" "<brief line that triggered the drop>" "${CLAUDE_SESSION_ID}" <<'PY'
-import json, os, sys, time
-a = sys.argv[1:]
-log_dir = os.environ.get("CLAUDE_REVIEW_LOG_DIR") or os.path.join(os.path.expanduser("~"), ".claude", "logs")
-os.makedirs(log_dir, exist_ok=True)
-entry = {
-    "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "event": "brief_drop",
-    "session": a[6] or "unknown",
-    "diff_sha": a[0], "file": a[1], "line_start": int(a[2]), "line_end": int(a[3]),
-    "issue": a[4], "brief_excerpt": a[5], "verdict": None,
-}
-with open(os.path.join(log_dir, "critical-review.jsonl"), "a") as fh:
-    fh.write(json.dumps(entry) + "\n")
-PY
+RL="<dir of RB>/review-log.py"
+python3 "$RL" run session="${CLAUDE_SESSION_ID}" \
+  repo="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || echo unknown)")" \
+  diff_sha="$(git rev-parse HEAD 2>/dev/null || echo uncommitted)" \
+  model="<BACKEND> <MODEL>" mode="<REVIEW_MODE>" brief_active="<1 if a brief was used, else 0>" \
+  reviewer_findings="<how many the reviewer returned>" dropped_scope="<Phase 3 drops>" \
+  dropped_judgment="<Phase 4a drops, brief drops excluded>" dropped_brief="<brief drops>" \
+  kept="<surviving findings, strict + likely>"
 ```
 
-`verdict` starts `null`; the user later patches it (`"real"`, `"false_positive"`, `"cosmetic"`,
-`"ignored"`; for brief drops `"correct_drop"` / `"false_drop"`) with `jq` or an editor. After ~20 runs
-precision = real / (real + false_positive) drives further tuning.
+**2. One `finding` event per surviving finding** (strict and likely; not the dropped ones). `n` is the
+number the finding carries in the rendered output (`3` for `3/Total`, `L2` for likely-in-scope).
+Several calls can share one Bash invocation:
+
+```bash
+python3 "$RL" finding session="${CLAUDE_SESSION_ID}" run_id="<RUN_ID>" n="<N>" severity="<severity>" \
+  file="<file>" line_start="<line_start>" line_end="<line_end>" issue="<one short sentence, <200 chars>"
+```
+
+**3. One `brief_drop` event per `intentional-by-conversation` drop** (`k` counts them: 1, 2, …) — the
+brief-precision dataset; without it "did the brief ever hide a real bug?" has no answer:
+
+```bash
+python3 "$RL" brief_drop session="${CLAUDE_SESSION_ID}" run_id="<RUN_ID>" k="<K>" file="<file>" \
+  line_start="<line_start>" line_end="<line_end>" issue="<one short sentence>" \
+  brief_excerpt="<the brief line that triggered the drop, <200 chars>"
+```
+
+Values are plain shell arguments: keep `issue`, `reason` and `brief_excerpt` free of double quotes,
+backticks and `$` (rephrase instead of escaping). The script rejects a malformed call with exit 1 and
+writes nothing — fix the call and retry once.
+
+**4. Decisions and outcomes are logged later, where they happen** — Step 4c (what the user answers)
+and Phase 5 (what happened to each fix):
+
+| Event | Fields | When |
+|---|---|---|
+| `decision` | `run_id`, `n`, `decision=accepted\|declined`, `via=plan_approval\|go_ahead\|plan_request\|pushback`, `reason` | the user accepts a finding (approves the plan, says `go ahead on N` or `/plan N`) or rejects it as wrong |
+| `resolution` | `run_id`, `n`, `status=auto_applied\|skipped\|failed\|abandoned`, `reason`, `complexity` | Phase 5 / a `go ahead` edit: what happened to the fix |
+| `brief_drop_overruled` | `run_id`, `k`, `reason` | after `show dropped`, the user says a brief drop was a real finding |
+
+A later decision on the same finding supersedes the earlier one (the stats take the last). `skip`,
+silence, or a denied plan with no stated objection logs **nothing** — that finding stays unresolved.
 
 **If an append fails** (disk, permissions, python error): do not abort or re-prompt. The review
 output is the deliverable; move on.
+
+**Reading the log:** `python3 "<dir of RB>/critical-review-stats.py"` — distinct ids, undecided
+findings reported as unresolved instead of guessed, rows from before the event schema in a separate
+legacy bucket. The log and therefore the numbers are host-local.
 
 ---
 
@@ -595,11 +613,11 @@ Order: strict findings (critical → low); then, if any, the likely findings und
 
 ```
 ---
-## ⚠ Scope unverifiable (file dirty at session start, no blob attribution)
+## ⚠ Scope unverifiable (this session's share of the file cannot be proven)
 
-These findings sit in files that were already modified when this session began. Without a
-session-start blob snapshot the flagged lines cannot be proven to come from THIS session. Most are
-still real bugs the session either introduced or now owns.
+These findings sit in files that were already modified when this session began and have no usable
+snapshot, or that have no text hunks (binary). The flagged lines cannot be proven to come from THIS
+session. Most are still real bugs the session either introduced or now owns.
 ```
 
 each prefixed `[scope: likely]`.
@@ -616,7 +634,7 @@ each prefixed `[scope: likely]`.
 - **Audit the brief** → reply `show brief` for the full conversation brief used for filtering.
 - **Done** → say `skip` or ignore this message.
 
-Reviewer: <BACKEND> · <MODEL> · <MODE_LABEL>
+Reviewer: <BACKEND> · <MODEL> · <MODE_LABEL> · run <RUN_ID>
 
 Dropped (visible audit, not silent):
 [one line per dropped finding: `- <severity> · <file>:<lines> — <reason>`; for intentional-by-conversation drops append the triggering brief line in parentheses. Every drop, not just a count. "(none)" if zero.]
@@ -627,11 +645,24 @@ Brief used for filtering:
 Changes are NOT committed. Commit when you are satisfied.
 ```
 
+**Log what the user then answers** (later turns; vocabulary in Step 4b-log §4). Take the `run_id`
+from the review the user is answering — the `run <RUN_ID>` line under it — never from a newer review:
+
+- `go ahead on N` → `decision` accepted `via=go_ahead`, then after the edit a `resolution`
+  (`auto_applied`, or `failed` / `skipped` with the reason).
+- The user pushes back and the finding is withdrawn as wrong → `decision` declined `via=pushback`
+  with the reason in a few words. If the discussion ends with the finding standing, log nothing new.
+- After `show dropped`, the user says a brief drop was real → `brief_drop_overruled` for its `k`, and
+  treat the finding as reinstated.
+- `/plan N` → `decision` accepted `via=plan_request` — asking for a plan accepts the finding as
+  real. No `resolution`: the fix happens in `/plan` → `/implement`, outside this log.
+- `skip`, silence → nothing. Unresolved is a legitimate final state.
+
 If zero strict AND zero likely findings survived, skip the options block:
 
 ```
 No actionable findings for this session's changes.
-Reviewer: <BACKEND> · <MODEL> · <MODE_LABEL>
+Reviewer: <BACKEND> · <MODEL> · <MODE_LABEL> · run <RUN_ID>
 
 Dropped (visible audit, not silent):
 [same per-line listing, or "(none)"]
@@ -655,9 +686,9 @@ Call `EnterPlanMode`, write the plan file with the template below, then `ExitPla
 - `--since`: **Mode:** Since-window review · **Since:** `<SINCE_REF>` (resolved to `<short REVIEW_BASE>`) · **Range:** `<REVIEW_RANGE>`
 - otherwise: **Scope:** This session's changes since `<short REVIEW_BASE>` (range `<REVIEW_RANGE>`).
 
-**Reviewer:** <BACKEND> · <MODEL> · <MODE_LABEL>[, focus: "…"]
+**Reviewer:** <BACKEND> · <MODEL> · <MODE_LABEL>[, focus: "…"] · run `<RUN_ID>`
 **Brief:** [active: one-line Intent + `(N do-not-flag items, M rejected alternatives)` · `--no-brief`: `(disabled)` · degenerate: `(no conversation intent detected)`]
-**Likely-in-scope (after the strict findings):** [K] findings in files dirty at session start without blob attribution — reviewed, NOT auto-fixed; the user adjudicates each after the plan runs.
+**Likely-in-scope (after the strict findings):** [K] findings in files whose session share is unprovable (`LIKELY` verdict) — reviewed, NOT auto-fixed; the user adjudicates each after the plan runs.
 **Dropped:** [`<file>:<lines> — <reason>` per line; intentional-by-conversation drops append `(brief: <line>)`; "none" if zero]
 
 ---
@@ -679,7 +710,7 @@ Call `EnterPlanMode`, write the plan file with the template below, then `ExitPla
 
 ## ⚠ Likely-in-scope (NOT in the auto-fix order)
 
-Files dirty at session start, no blob snapshot: possibly this session's bugs, possibly pre-existing.
+Files whose session share is unprovable (`LIKELY` verdict): possibly this session's bugs, possibly pre-existing.
 The executor skips them; after the plan completes, surface them in chat for a one-by-one decision.
 
 ### L1/[Total likely] · `[scope: likely]` · [severity] · `path/to/file:line_start-line_end`
@@ -702,8 +733,11 @@ This command runs no tests and commits nothing. After the fixes: run the project
 its CLAUDE.md), then commit when satisfied.
 ```
 
-- **Approved** → Phase 5.
-- **Denied / exited** → stop. Nothing was edited; the log entries persist for later triage.
+- **Approved** → log one `decision` accepted `via=plan_approval` per strict finding in the plan
+  (Step 4b-log §4), then Phase 5.
+- **Denied / exited** → stop. Nothing was edited. Log a `decision` declined (`via=pushback`, reason)
+  ONLY for findings the user explicitly called wrong; a bare denial says nothing about the findings —
+  they stay unresolved.
 
 ---
 
@@ -718,21 +752,18 @@ For each fix:
    `target_drifted` and continue.
 2. Apply with `Edit` (preferred) or `Write` (new files only).
 3. Re-read the modified region and confirm the change is what you intended.
-4. Log it (argv: diff sha, file, line_start, line_end, complexity, session id):
+4. Log the outcome as a `resolution` event (Step 4b-log §4; `n` = the finding's number in the plan,
+   `run_id` = the one in the plan's Reviewer line):
 
 ```bash
-python3 - "$DIFF_SHA" "<file>" "<line_start>" "<line_end>" "<complexity>" "${CLAUDE_SESSION_ID}" <<'PY'
-import json, os, sys, time
-a = sys.argv[1:]
-log_dir = os.environ.get("CLAUDE_REVIEW_LOG_DIR") or os.path.join(os.path.expanduser("~"), ".claude", "logs")
-os.makedirs(log_dir, exist_ok=True)
-entry = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "event": "auto_applied",
-         "session": a[5] or "unknown", "diff_sha": a[0], "file": a[1],
-         "line_start": int(a[2]), "line_end": int(a[3]), "complexity": a[4]}
-with open(os.path.join(log_dir, "critical-review.jsonl"), "a") as fh:
-    fh.write(json.dumps(entry) + "\n")
-PY
+python3 "<dir of RB>/review-log.py" resolution session="${CLAUDE_SESSION_ID}" run_id="<RUN_ID>" n="<N>" \
+  status=auto_applied complexity="<complexity>"
 ```
+
+   A fix you SKIP gets `status=skipped reason=target_drifted`; an `Edit` that errors gets
+   `status=failed reason=edit_failed`; every fix abandoned because the loop stopped gets
+   `status=abandoned reason=loop_stopped`. Executed ≠ accepted ≠ correct — this event records only
+   what happened to the edit.
 
 Log failures stay non-fatal.
 

@@ -85,9 +85,10 @@ if [ -n "$HEAD_COMMIT" ]; then
 fi
 
 # GC session files older than 7 days (start markers, dirty/blob snapshots, /critical-review's
-# last-review marker and brief). Trailing slash required on macOS — /tmp is a symlink to /private/tmp.
+# last-review marker, brief and dirty-list fallback). Trailing slash required on macOS — /tmp is a symlink to /private/tmp.
 find "${MARKER_DIR}/" -maxdepth 1 \( -name 'claude-session-start-commit-*' -o -name 'claude-session-start-dirty-*' \
   -o -name 'claude-session-start-blobs-*' -o -name 'claude-session-last-review-commit-*' \
-  -o -name 'claude-session-last-review-blobs-*' -o -name 'claude-review-brief-*' -o -name 'claude-review-result-*' \) \
+  -o -name 'claude-session-last-review-blobs-*' -o -name 'claude-review-brief-*' -o -name 'claude-review-result-*' \
+  -o -name 'claude-review-dirty-fallback-*' \) \
   -mtime +7 -delete 2>/dev/null || true
 exit 0

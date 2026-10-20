@@ -68,7 +68,8 @@ to have looked at pixels.**
    reference is the input you're given, not an external tool.
 2. **Drive the real page** via the browser MCP (chrome-devtools: `navigate_page`, `take_snapshot`,
    `take_screenshot`, `evaluate_script`) — the running app, not a static mock. Capture the current
-   state at the breakpoints that matter: desktop, tablet, mobile (`resize_page`).
+   state at the breakpoints that matter: desktop, tablet, mobile (`emulate` with a viewport —
+   `resize_page` cannot go below 500 px).
 3. **Diff against intent** — for each reported problem (white button, bold ad tag, broken tablet
    alignment, sidebar whitespace, misaligned header bar, drift from the design proposal…), state
    observed vs. intended concretely. Screenshot as evidence, don't assert from the DOM alone.

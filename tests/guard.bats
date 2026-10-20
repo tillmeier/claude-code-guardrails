@@ -11,6 +11,7 @@ setup() {
   FMT="$ROOT/hooks/format-file.sh"
   START="$ROOT/hooks/session-start.sh"
   COMPACT="$ROOT/hooks/precompact-handoff.sh"
+  INJECT="$ROOT/hooks/compact-handoff-inject.sh"
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null   # no user hooks/aliases in temp repos
   export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
 }
@@ -294,6 +295,62 @@ new_repo() {  # $1 = name; leaves you inside a fresh repo with one commit
   run env CLAUDE_HANDOFF_DIR="$h" bash -c "printf '%s' '{\"session_id\":\"sid-r\"}' | bash '$COMPACT'"
   [ "$status" -eq 0 ]
   grep -q 'not in a git repo' "$h/sid-r.md"
+}
+
+# ───────────────────────────── compact-handoff-inject ─────────────────────────────
+
+@test "compact read-back: after two compactions, source=compact injects only the LAST section as additionalContext" {
+  new_repo ci1
+  h="$BATS_TEST_TMPDIR/handoffs-ci1"
+  echo first > first.txt
+  run env CLAUDE_HANDOFF_DIR="$h" bash -c "printf '%s' '{\"session_id\":\"sid-c\"}' | bash '$COMPACT'"
+  rm first.txt; echo second > second.txt
+  run env CLAUDE_HANDOFF_DIR="$h" bash -c "printf '%s' '{\"session_id\":\"sid-c\"}' | bash '$COMPACT'"
+  [ "$(grep -c '^## Compaction @' "$h/sid-c.md")" -eq 2 ]
+  run env CLAUDE_HANDOFF_DIR="$h" bash -c "printf '%s' '{\"session_id\":\"sid-c\",\"source\":\"compact\"}' | bash '$INJECT'"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" > "$BATS_TEST_TMPDIR/inject.json"
+  python3 - "$BATS_TEST_TMPDIR/inject.json" <<'PY2'
+import json, sys
+d = json.load(open(sys.argv[1]))["hookSpecificOutput"]
+assert d["hookEventName"] == "SessionStart", d
+ctx = d["additionalContext"]
+assert ctx.count("## Compaction @") == 1, ctx           # last section only
+assert "second.txt" in ctx and "first.txt" not in ctx, ctx
+PY2
+}
+
+@test "compact read-back: the injected section is capped at 2500 characters" {
+  h="$BATS_TEST_TMPDIR/handoffs-ci2"; mkdir -p "$h"
+  { echo "## Compaction @ 2026-01-01 00:00:00"; for i in $(seq 1 400); do echo "- line $i of filler text"; done; } > "$h/sid-big.md"
+  run env CLAUDE_HANDOFF_DIR="$h" bash -c "printf '%s' '{\"session_id\":\"sid-big\",\"source\":\"compact\"}' | bash '$INJECT'"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" > "$BATS_TEST_TMPDIR/big.json"
+  python3 -c 'import json,sys; c=json.load(open(sys.argv[1]))["hookSpecificOutput"]["additionalContext"]; s=c[c.index("## Compaction @"):]; assert len(s)==2500, len(s)' "$BATS_TEST_TMPDIR/big.json"
+}
+
+@test "compact read-back: silent and exit 0 for another source, no handoff file, a hostile id or garbage" {
+  h="$BATS_TEST_TMPDIR/handoffs-ci3"; mkdir -p "$h"; echo "## Compaction @ x" > "$h/sid-s.md"
+  run env CLAUDE_HANDOFF_DIR="$h" bash -c "printf '%s' '{\"session_id\":\"sid-s\",\"source\":\"startup\"}' | bash '$INJECT'"; allowed
+  run env CLAUDE_HANDOFF_DIR="$h" bash -c "printf '%s' '{\"session_id\":\"sid-s\",\"source\":\"resume\"}' | bash '$INJECT'"; allowed
+  run env CLAUDE_HANDOFF_DIR="$h" bash -c "printf '%s' '{\"session_id\":\"sid-none\",\"source\":\"compact\"}' | bash '$INJECT'"; allowed
+  echo "## Compaction @ secret" > "$BATS_TEST_TMPDIR/evil.md"
+  run env CLAUDE_HANDOFF_DIR="$h" bash -c "printf '%s' '{\"session_id\":\"../evil\",\"source\":\"compact\"}' | bash '$INJECT'"; allowed
+  run env CLAUDE_HANDOFF_DIR="$h" bash -c "printf 'not json' | bash '$INJECT'"; allowed
+  run env CLAUDE_HANDOFF_DIR="$h" bash -c "bash '$INJECT' </dev/null"; allowed
+  # positive control in the same dir: the matching source does inject
+  run env CLAUDE_HANDOFF_DIR="$h" bash -c "printf '%s' '{\"session_id\":\"sid-s\",\"source\":\"compact\"}' | bash '$INJECT'"
+  [ "$status" -eq 0 ]; [[ "$output" == *'"additionalContext"'* ]]
+}
+
+@test "wiring: the read-back is registered as a SessionStart hook with matcher compact" {
+  python3 - "$ROOT" <<'PY2'
+import json, os, sys
+h = json.load(open(os.path.join(sys.argv[1], "hooks", "hooks.json")))
+groups = [g for g in h["hooks"]["SessionStart"] if any("compact-handoff-inject.sh" in x["command"] for x in g["hooks"])]
+assert len(groups) == 1 and groups[0].get("matcher") == "compact", groups
+assert any("session-start.sh" in x["command"] for g in h["hooks"]["SessionStart"] if "matcher" not in g for x in g["hooks"])
+PY2
 }
 
 # ───────────────────────────── wiring ─────────────────────────────

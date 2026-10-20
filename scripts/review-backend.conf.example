@@ -9,7 +9,10 @@ REVIEWER=""
 
 # Model pins. Pin explicitly: a vendor default can be deprecated or unavailable on your account
 # without warning, and a review that silently ran on a fallback model is worse than none.
-CODEX_REVIEW_MODEL="gpt-5.6-sol"
+# gpt-6.1-sol needs codex CLI >= 0.160 (tested with 0.160.0; 0.155 does not know it). In the GPT-6
+# family "sol" is the MID tier (astra = flagship, luna = small). An unknown name fails the run
+# (exit 4), it does not fall back — see docs/review-backend.md for the old-CLI caveat.
+CODEX_REVIEW_MODEL="gpt-6.1-sol"
 CLAUDE_REVIEW_MODEL="claude-opus-5"
 
 # Reasoning effort for the codex reviewer, passed as `-c model_reasoning_effort=<value>` to both the

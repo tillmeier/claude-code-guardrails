@@ -22,8 +22,9 @@ not-shipping-a-surprise is.
 - **Decompose into an ordered step list** of the smallest independently-shippable increments, and
   show it. Ranked-options audits often bury scope ambiguity here — e.g. "implement it" could mean
   *all* the options or just the top-ranked ones the audit itself recommends first. **Surface that as
-  an open question and get an answer before writing anything.** Do not assume "all of it, in listed
-  order" — confirm order and cut-line.
+  an open question (with your `GUESS:` attached — see *Ask, don't guess* below) and get an answer
+  before writing anything.** Do not assume "all of it, in listed order" — confirm order and
+  cut-line.
 - Honor the global anti-fabrication rule: every file/function/column/flag you name in the step plan
   is cited (`path:line`) or hedged. Grep before you assert.
 
@@ -45,6 +46,10 @@ For each step, in order:
 **Ask, don't guess.** The moment a step needs a decision the plan didn't settle — an ambiguous
 requirement, two reasonable approaches, an unclear expected value — stop and ask. A wrong guess
 buried three steps deep is expensive to unwind.
+
+**Every question carries your guess** — the Phase 1 scope / cut-line question included:
+`Q: … GUESS: <your best answer + why>`, one question per decision. "Don't guess" means don't ACT
+on the guess; stating it lets the user settle the question in one word.
 
 ## HALT conditions — stop and surface, do not push through
 
