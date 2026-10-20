@@ -49,15 +49,20 @@ done
 TOP=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "scope-delta: not inside a git repository" >&2; exit 1; }
 cd "$TOP" || exit 1
 
+# No `producer | grep -q` anywhere below: grep -q exits on the first match, the producer dies of
+# SIGPIPE on a large input, and under pipefail the MATCH reads as a miss (a pre-dirty file became
+# FULL, a big text diff became "no-text-hunks"). Read files directly, match strings in bash.
 in_dirty() {   # $1 = path; exact line match against the dirty list
   if [ $HAVE_DIRTY -eq 1 ]; then grep -Fxq -- "$1" "$DIRTY"
-  else cut -f2 "$BLOBS" | grep -Fxq -- "$1"; fi
+  else F="$1" awk -F'\t' '$2 == ENVIRON["F"] { found = 1 } END { exit !found }' "$BLOBS"; fi
 }
 
+NL=$'\n'
+HEX_SHA='^[0-9a-f]{40,64}$'   # in a variable: bash 3.2 and 5 agree on an unquoted =~ "$var"
 # Prints the verdict for a finished diff. $1 = kind on success, $2 = path, $3 = diff text.
 emit() {
   if [ -z "$3" ]; then echo "VERDICT UNCHANGED $2"
-  elif ! printf '%s\n' "$3" | grep -q '^@@'; then echo "VERDICT LIKELY $2 (no-text-hunks)"
+  elif case "$3" in "@@"*|*"${NL}@@"*) false ;; *) true ;; esac; then echo "VERDICT LIKELY $2 (no-text-hunks)"
   else echo "VERDICT $1 $2"; printf '%s\n' "$3" | sed -n 's/^\(@@ [^@]* @@\).*/\1/p'; fi   # ranges only, no context text
 }
 
@@ -84,7 +89,7 @@ for p in "$@"; do
   # Dirty at the baseline: diff the baseline blob against the content now.
   THEN=$(F="$p" awk -F'\t' '$2 == ENVIRON["F"] { print $1; exit }' "$BLOBS" 2>/dev/null)
   if [ -z "$THEN" ]; then echo "VERDICT LIKELY $p (not-snapshotted)"; continue; fi
-  if ! printf '%s' "$THEN" | grep -qE '^[0-9a-f]{40,64}$' || [ "$(git cat-file -t "$THEN" 2>/dev/null)" != "blob" ]; then
+  if ! [[ $THEN =~ $HEX_SHA ]] || [ "$(git cat-file -t "$THEN" 2>/dev/null)" != "blob" ]; then
     echo "VERDICT LIKELY $p (broken: snapshot sha unusable: $THEN)"; continue
   fi
   if [ -n "$NOW_REV" ]; then

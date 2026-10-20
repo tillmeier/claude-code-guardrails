@@ -240,3 +240,18 @@ PY
   python3 "$RL" run session=sid-5 >/dev/null
   run python3 "$STATS"; [ "$status" -eq 0 ]; [[ "$output" == *"runs: 1"* ]]
 }
+
+@test "scope-delta: large inputs — a big baseline list and a big text diff are not misread (pipefail + early-exit grep)" {
+  baseline_repo sd10
+  printf 'p1\np2-pre\np3\np4-session\n' > pre.txt
+  big="$BATS_TEST_TMPDIR/blobs-big"
+  grep $'\tpre.txt$' "$BLOBS" > "$big"                                      # the match comes FIRST …
+  python3 -c 'import sys
+for i in range(60000): sys.stdout.write("%040x\tfiller/%d.txt\n" % (i, i))' >> "$big"   # … then MBs the reader must not abandon
+  run bash "$SD" --blobs "$big" -- pre.txt
+  [ "$status" -eq 0 ]; [[ "$output" == $'VERDICT DELTA pre.txt\n@@ -3,0 +4 @@' ]]   # not FULL: pre-session line 2 stays out
+  python3 -c 'import sys
+sys.stdout.write("".join("line %d %s\n" % (i, "x" * 60) for i in range(4000)))' > large.txt   # ~270 KB text diff
+  run bash "$SD" --dirty "$DIRTY" --blobs "$BLOBS" -- large.txt
+  [ "$status" -eq 0 ]; [ "$output" = $'VERDICT FULL large.txt\n@@ -0,0 +1,4000 @@' ]   # not LIKELY (no-text-hunks)
+}
