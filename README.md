@@ -16,6 +16,8 @@ from my private config.
 - **Reviewer backend** — `/critical-review` runs an independent, read-only reviewer on the diff
   (Codex CLI, Claude Code CLI, or your own command) through one adapter script, and never shows it
   the task brief.
+- **Skill** — `browser-mcp`: how to drive chrome-devtools-mcp cheaply and safely (which server for
+  what, token-cheap check order, screenshot/emulate pitfalls, secrets, logged-in apps).
 - **Output style** — `terse.md`: result first, no padding.
 - **Fleet sync** — push commands/skills/styles to your servers over SSH, audit drift with `--check`.
 
@@ -29,8 +31,8 @@ As a plugin (Claude Code ≥ 2.1):
 ```
 
 Restart Claude Code. Hooks are active immediately; commands are namespaced
-(`/guardrails:plan`, `/guardrails:verify`, `/guardrails:critical-review`, …); the output style is
-selectable with `/output-style Terse`.
+(`/guardrails:plan`, `/guardrails:verify`, `/guardrails:critical-review`, …), so is the skill
+(`guardrails:browser-mcp`); the output style is selectable with `/output-style Terse`.
 
 By hand (bare `/plan`, `/verify`, … and control over which hooks run):
 
@@ -38,6 +40,7 @@ By hand (bare `/plan`, `/verify`, … and control over which hooks run):
 git clone https://github.com/tillmeier/claude-code-guardrails ~/claude-code-guardrails
 cp ~/claude-code-guardrails/commands/*.md      ~/.claude/commands/
 cp ~/claude-code-guardrails/output-styles/*.md ~/.claude/output-styles/
+mkdir -p ~/.claude/skills && cp -R ~/claude-code-guardrails/skills/browser-mcp ~/.claude/skills/
 ```
 
 then wire the hooks you want into `~/.claude/settings.json`. `/critical-review` looks for its backend
@@ -120,6 +123,27 @@ Notes:
 The loop in practice: `docs/workflow-recipes.md`. Plan files land in `.claude/plans/`,
 gitignore them if you don't want them tracked.
 
+## Skill: browser-mcp
+
+`skills/browser-mcp/SKILL.md` loads before the first
+[chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp) call. It covers which
+server to use for what, the cheapest check order (script → snapshot → screenshot), `filePath`
+roots, `wait_for` / `emulate` / screenshot pitfalls, tab hygiene, keeping secrets out of the
+transcript, and scraping or replaying the internal API of logged-in apps. `/verify --ui` points to
+it. It assumes two servers, measured on 1.10.1:
+
+```bash
+# isolated: temp profile, logged out — measuring and public pages
+claude mcp add -s user chrome-devtools -- npx -y chrome-devtools-mcp@1.10.1 --isolated \
+  --screenshotMaxWidth 1280 --screenshotMaxHeight 2000
+# attached to your running Chrome (144+) with its logins; needs remote debugging enabled
+# at chrome://inspect/#remote-debugging; while that is on, any local process can attach
+claude mcp add -s user chrome-live -- npx -y chrome-devtools-mcp@1.10.1 --autoConnect \
+  --redactNetworkHeaders --screenshotMaxWidth 1280 --screenshotMaxHeight 2000
+```
+
+The second server is optional; skip it if you don't want an agent acting with your logins.
+
 ## Reviewer backend
 
 `scripts/review-backend.sh` is the only vendor-specific piece behind `/critical-review`. It picks a
@@ -180,7 +204,7 @@ exit 2 on findings; `--dry-run` shows what would transfer.
 ## Tests
 
 ```bash
-bats tests/        # 77 tests: guard patterns, SQL guard, formatter, session marker, handoff + read-back, reviewer backend, review helpers, wiring
+bats tests/        # 79 tests: guard patterns, SQL guard, formatter, session marker, handoff + read-back, reviewer backend, review helpers, wiring
 ```
 
 CI runs the same suite on ubuntu; macOS bash 3.2 is the primary target. The backend tests run
@@ -219,6 +243,8 @@ the reviewers found in this port are in [docs/review-backend.md](docs/review-bac
 - `compact-handoff-inject.sh` refuses session ids that are not `[A-Za-z0-9._-]` before building a
   path from them.
 - `format-file.sh` reads the file path from the hook JSON itself, no `jq` wrapper needed.
+- `browser-mcp` keeps the lessons and drops the sites they were learned on, my own setup and my
+  risk decisions; server names are examples.
 - `sync-commands.sh` config moved to `sync-commands.conf`; `--help` works without one; empty
   `SERVERS` is an error, not a silent no-op.
 

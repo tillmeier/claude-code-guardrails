@@ -378,15 +378,33 @@ assert set(h["hooks"]) == {"SessionStart", "PreToolUse", "PostToolUse", "PreComp
 PY
 }
 
-@test "wiring: no \$<digit> anywhere in commands/*.md — the harness substitutes positional arguments there" {
+@test "wiring: no \$<digit> anywhere in commands/*.md or skills/*/SKILL.md — the harness substitutes positional arguments there" {
   python3 - "$ROOT" <<'PY'
 import glob, os, re, sys
 root = sys.argv[1]; bad = []
-for f in sorted(glob.glob(os.path.join(root, "commands", "*.md"))):
+files = glob.glob(os.path.join(root, "commands", "*.md")) + glob.glob(os.path.join(root, "skills", "*", "SKILL.md"))
+assert any("/skills/" in f for f in files), "no skill found — glob broken?"
+for f in sorted(files):
     for i, line in enumerate(open(f), 1):
         if re.search(r"\$[0-9]", line):
             bad.append("%s:%d: %s" % (os.path.relpath(f, root), i, line.rstrip()))
 assert not bad, "\n".join(bad)
+PY
+}
+
+@test "wiring: every skills/<name>/SKILL.md has frontmatter whose name is its directory and a one-line description" {
+  python3 - "$ROOT" <<'PY'
+import glob, os, re, sys
+root = sys.argv[1]
+skills = sorted(glob.glob(os.path.join(root, "skills", "*", "SKILL.md")))
+assert skills, "no skills found"
+for f in skills:
+    text = open(f).read()
+    m = re.match(r"---\n(.*?)\n---\n", text, re.S)
+    assert m, "no frontmatter: " + f
+    fm = dict(l.split(": ", 1) for l in m.group(1).splitlines())
+    assert fm.get("name") == os.path.basename(os.path.dirname(f)), (f, fm.get("name"))
+    assert 0 < len(fm.get("description", "")) <= 500, (f, len(fm.get("description", "")))
 PY
 }
 

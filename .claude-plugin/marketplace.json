@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Till Meier's Claude Code plugins",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "plugins": [
     {
       "name": "guardrails",
-      "description": "Guardrail hooks, a plan → implement → verify → crosscheck loop, a /critical-review exit gate with a pluggable reviewer backend, doc-tiering commands and a terse output style for Claude Code.",
-      "version": "0.3.0",
+      "description": "Guardrail hooks, a plan → implement → verify → crosscheck loop, a /critical-review exit gate with a pluggable reviewer backend, doc-tiering commands, a browser-MCP skill and a terse output style for Claude Code.",
+      "version": "0.4.0",
       "author": {
         "name": "Till Meier"
       },

@@ -9,8 +9,8 @@ root-level `CLAUDE.md` is not loaded for plugin users and trips `claude plugin v
 - The maintainer's private `~/.claude` config is the canonical source. This repo is a curated,
   scrubbed downstream of it: `hooks/git-staging-guard.sh`, `precompact-handoff.sh`,
   `session-start.sh` (private name: `session-start-hook.sh`), `format-file.sh`,
-  `scripts/sync-commands.sh`, all of `commands/`, `output-styles/terse.md` and `docs/` have a
-  private twin. Public-only: `sql-guard.sh`, `hooks.json`, the manifests, `tests/`, CI, README,
+  `scripts/sync-commands.sh`, all of `commands/`, `skills/browser-mcp/`, `output-styles/terse.md`
+  and `docs/` have a private twin. The skill is a rewrite: port lessons, never the sites or setup. Public-only: `sql-guard.sh`, `hooks.json`, the manifests, `tests/`, CI, README,
   and the reviewer adapter (`scripts/review-backend.sh`, its `.conf.example`, the findings schema).
 - `commands/critical-review.md` is a port, not a copy: the private twin stays pinned to the Codex
   plugin by design, the public one calls `scripts/review-backend.sh`. Port review-logic changes
