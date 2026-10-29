@@ -69,3 +69,47 @@ files. The discriminator is whether the list was seen.
   inspects Bash.
 - No blocking secret scanner since gitleaks was removed 2026-08-19 (privacy of repos + cost). A grep
   over the staged diff replaced it: a net, not a gate.
+
+## More traps in shared checkouts (2026-10)
+
+Each one cost real work in a repo several sessions used at once.
+
+- **`git worktree remove` deletes gitignored files without a word.** Without `--force` it refuses
+  only modified or untracked files; scratch data, captures, `.venv` and build output kept in the
+  worktree are gone, and processes started there keep running from the deleted directory (a dev
+  server served stale code for hours). Before removing: `git -C <wt> status --ignored --short`,
+  `lsof +D <wt>`, and ask the sessions that used it. "Clean and nothing unpushed" is not enough.
+- **A poisoned index: `fatal: unable to read <sha>` on `status` and `commit`.** `git ls-files -s`
+  listed files of a pre-commit hook's own repo; it happened after `~/.cache/pre-commit` was cleared
+  and the hook environments reinstalled (cause not proven). The fix is `git read-tree HEAD`, then
+  re-stage your files by name. `git reset` fails with the same error. Working tree and HEAD are
+  untouched.
+- **Don't reuse a branch after its PR was squash-merged.** The next PR from that branch got no
+  check run at all (`check-runs` → `total_count: 0`), so required checks never reported and
+  auto-merge waited forever. Branch fresh off `main` and `git checkout <old-branch> -- <paths>`;
+  merging `main` into the stale branch conflicts with the squashed copy of your own commit.
+- **`git reset --soft` onto a moved `origin/main` reverts other people's merges.** The index still
+  held the older tree, so one "fixtures" commit carried old versions of 11 files and would have
+  undone four merged commits. Before merging a bulk PR, list what it changes beside the bulk
+  (`git diff --name-only $(git merge-base HEAD origin/main) HEAD | grep -v '^<bulk-dir>/'`) and
+  compare each extra file's blob with the versions before its recent commits: an exact match means
+  a revert.
+- **"fix #N" anywhere in a commit title or body on the default branch closes PR #N**, not only
+  issues, and no leading "Fixes" is needed. A docs commit closed another session's approved PR and
+  disabled its auto-merge. Keep the verb away from the number ("PR #N (search fix)"); repair with
+  `gh pr reopen N` and re-enable auto-merge.
+- **"ahead 1" is not yours by default.** The one unpushed commit can be another session's, held
+  back for review; a plain push ships it. Check `git log origin/<branch>..HEAD` first. To push only
+  yours: a detached worktree at `origin/<branch>`, `cherry-pick` your commits, `cmp` the touched
+  files, push from there.
+- **The checkout may be on another session's branch.** The session-start snapshot said `master`; a
+  parallel session had switched the shared checkout since, and `git checkout -b` branched off their
+  branch and moved the checkout out from under them. Run `git status -sb` before branching, and
+  branch in your own `git worktree add`.
+- **A code rewind silently reverts other sessions' commits.** Claude Code's checkpoint restore
+  (Esc Esc → restore code, `--rewind-files`, the SDK `rewind_files` request) copies the session's
+  backup over the current file without checking for changes made since, so a commit another session
+  made to that file is undone in the working tree (code read of 2.1.312; seen once, sat dirty for
+  three days). `"fileCheckpointingEnabled": false` in the main checkout's
+  `.claude/settings.local.json` turns it off for that repo and its worktrees (measured); conversation
+  rewind keeps working.
