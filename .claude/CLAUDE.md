@@ -9,9 +9,12 @@ root-level `CLAUDE.md` is not loaded for plugin users and trips `claude plugin v
 - The maintainer's private `~/.claude` config is the canonical source. This repo is a curated,
   scrubbed downstream of it: `hooks/git-staging-guard.sh`, `precompact-handoff.sh`,
   `session-start.sh` (private name: `session-start-hook.sh`), `format-file.sh`,
-  `scripts/sync-commands.sh`, all of `commands/`, `skills/browser-mcp/`, `output-styles/terse.md`
-  and `docs/` have a private twin. The skill is a rewrite: port lessons, never the sites or setup. Public-only: `sql-guard.sh`, `hooks.json`, the manifests, `tests/`, CI, README,
-  and the reviewer adapter (`scripts/review-backend.sh`, its `.conf.example`, the findings schema).
+  `scripts/sync-commands.sh`, `commands/` (except `setup-check.md`), `skills/browser-mcp/`,
+  `output-styles/terse.md` and `docs/` have a private twin. The skill is a rewrite: port lessons,
+  never the sites or setup. Public-only: `sql-guard.sh`, `hooks.json`, the manifests, `tests/`, CI,
+  README, the reviewer adapter (`scripts/review-backend.sh`, its `.conf.example`, the findings
+  schema) and `/setup-check` (`commands/setup-check.md`, `scripts/setup-check.sh`,
+  `docs/setup-check.md`).
 - `commands/critical-review.md` is a port, not a copy: the private twin stays pinned to the Codex
   plugin by design, the public one calls `scripts/review-backend.sh`. Port review-logic changes
   (scope, brief, filtering, findings format) in both directions; do not port the backend abstraction

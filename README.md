@@ -21,20 +21,47 @@ from my private config.
 - **Output style** — `terse.md`: result first, no padding.
 - **Fleet sync** — push commands/skills/styles to your servers over SSH, audit drift with `--check`.
 
-## Install
+## Quick start (fresh Mac)
 
-As a plugin (Claude Code ≥ 2.1):
+You need Claude Code ≥ 2.1, installed and logged in. Homebrew is optional.
 
-```
-/plugin marketplace add tillmeier/claude-code-guardrails
-/plugin install guardrails@tillmeier
-```
+1. **Command-line tools.** Install them if `git --version` asks for them: `xcode-select --install`.
+   They provide git and python3.
+2. **The plugin.** In Claude Code, run the two commands below, then restart Claude Code:
+   ```
+   /plugin marketplace add tillmeier/claude-code-guardrails
+   /plugin install guardrails@tillmeier
+   ```
+   - Hooks are active right away.
+   - Commands and the skill are namespaced: `/guardrails:plan`, `/guardrails:critical-review`,
+     `guardrails:browser-mcp`, ….
+3. **Check what works here.** `/guardrails:setup-check` prints ✓/✗ per part, with the exact fix for
+   each gap. It installs nothing. Each ✓ says what it rests on, e.g. "login not checked" or
+   "browser launch not tested". It also flags hooks that run twice because your `settings.json`
+   registers them as well.
+4. **Optional browser servers**, for the `browser-mcp` skill and `/verify --ui`. They need Node
+   (`^20.19`, `^22.12` or ≥ 23; `brew install node`) and Google Chrome:
+   ```bash
+   # isolated: temp profile, logged out — measuring and public pages
+   claude mcp add -s user chrome-devtools -- npx -y chrome-devtools-mcp@1.10.1 --isolated --screenshotMaxWidth 1280 --screenshotMaxHeight 2000
+   # optional, attached to your running Chrome (144+) with its logins. Needs remote debugging enabled
+   # at chrome://inspect/#remote-debugging; while that is on, any local process can attach.
+   claude mcp add -s user chrome-live -- npx -y chrome-devtools-mcp@1.10.1 --autoConnect --redactNetworkHeaders --screenshotMaxWidth 1280 --screenshotMaxHeight 2000
+   ```
+   Skip the second server if you don't want an agent acting with your logins.
+5. **Optional extras:**
+   - `/output-style Terse`.
+   - A reviewer for `/critical-review`: the Codex CLI (`npm i -g @openai/codex && codex login`) or
+     the Claude Code CLI.
+   - The [Codex plugin](https://github.com/openai/codex-plugin-cc) for `/plan --codex`.
+6. **Restart, then run `/guardrails:setup-check` again.**
 
-Restart Claude Code. Hooks are active immediately; commands are namespaced
-(`/guardrails:plan`, `/guardrails:verify`, `/guardrails:critical-review`, …), so is the skill
-(`guardrails:browser-mcp`); the output style is selectable with `/output-style Terse`.
+If the same Mac also carries a hand-installed copy of these files (or a private config they came
+from), pick one. Step 3 shows hooks that would run twice.
 
-By hand (bare `/plan`, `/verify`, … and control over which hooks run):
+### By hand
+
+For bare `/plan`, `/verify`, … and control over which hooks run:
 
 ```bash
 git clone https://github.com/tillmeier/claude-code-guardrails ~/claude-code-guardrails
@@ -119,6 +146,7 @@ Notes:
 | `/cleanup-docs` | Doc audit: measure → verify → cut; token-greps every fact before removing text; reports in bytes |
 | `/refactor-claude-md` | Restructures CLAUDE.md into a lean core + on-demand tiers, no `@`-imports |
 | `/init-local-md` | Generates a gitignored `.claude/local.md` from detected environment |
+| `/setup-check` | What of this plugin is set up on this machine: git/python3, reviewer, Codex plugin, Node, Chrome, browser MCP servers, output style, hooks registered twice. ✓/✗ with the exact fix; installs nothing. Not named `doctor`, because Claude Code has a built-in `/doctor` |
 
 The loop in practice: `docs/workflow-recipes.md`. Plan files land in `.claude/plans/`,
 gitignore them if you don't want them tracked.
@@ -130,19 +158,8 @@ gitignore them if you don't want them tracked.
 server to use for what, the cheapest check order (script → snapshot → screenshot), `filePath`
 roots, `wait_for` / `emulate` / screenshot pitfalls, tab hygiene, keeping secrets out of the
 transcript, and scraping or replaying the internal API of logged-in apps. `/verify --ui` points to
-it. It assumes two servers, measured on 1.10.1:
-
-```bash
-# isolated: temp profile, logged out — measuring and public pages
-claude mcp add -s user chrome-devtools -- npx -y chrome-devtools-mcp@1.10.1 --isolated \
-  --screenshotMaxWidth 1280 --screenshotMaxHeight 2000
-# attached to your running Chrome (144+) with its logins; needs remote debugging enabled
-# at chrome://inspect/#remote-debugging; while that is on, any local process can attach
-claude mcp add -s user chrome-live -- npx -y chrome-devtools-mcp@1.10.1 --autoConnect \
-  --redactNetworkHeaders --screenshotMaxWidth 1280 --screenshotMaxHeight 2000
-```
-
-The second server is optional; skip it if you don't want an agent acting with your logins.
+it. It assumes the two servers from [Quick start](#quick-start-fresh-mac) step 4 (measured on
+1.10.1); the second one is optional.
 
 ## Reviewer backend
 
@@ -204,7 +221,7 @@ exit 2 on findings; `--dry-run` shows what would transfer.
 ## Tests
 
 ```bash
-bats tests/        # 79 tests: guard patterns, SQL guard, formatter, session marker, handoff + read-back, reviewer backend, review helpers, wiring
+bats tests/        # 96 tests: guard patterns, SQL guard, formatter, session marker, handoff + read-back, reviewer backend, review helpers, setup check, wiring
 ```
 
 CI runs the same suite on ubuntu; macOS bash 3.2 is the primary target. The backend tests run
@@ -216,7 +233,8 @@ The git guard exists because a chained `git add -A && … && git commit` once sw
 session's work into a commit. The incident, the approaches that were tried and rejected, and the
 measured hook costs are in [docs/git-staging-safety.md](docs/git-staging-safety.md). Why the
 reviewer never sees the brief, why `--restricted` and not `--bare`, measured review times, and what
-the reviewers found in this port are in [docs/review-backend.md](docs/review-backend.md).
+the reviewers found in this port are in [docs/review-backend.md](docs/review-backend.md). What
+`/setup-check` claims and why, and the CLI output it parses: [docs/setup-check.md](docs/setup-check.md).
 
 ## Not included
 
