@@ -73,7 +73,10 @@ screenshots took about 40 % of all browser-tool context.
   page top. Don't burn shots retrying. Measure the element with `evaluate_script` instead
   (`getBoundingClientRect`, computed styles, `scrollWidth > innerWidth`). To show it anyway, clone
   it into a `position:fixed;inset:0;z-index:2147483647` overlay, run `window.scrollTo(0,0)`, then
-  take a viewport shot. Without the scroll reset the shot still shows the top.
+  take a viewport shot. Without the scroll reset the shot still shows the top. To keep the
+  surrounding layout instead, run `window.scrollTo(0,0)` and shift the page up with
+  `document.body.style.transform='translateY(-<px>px)'`, where `<px>` is the element's distance
+  from the page top minus a small margin.
 - `emulate` reloads the page, so anything you injected is gone afterwards.
 - **Each `emulate` call replaces all emulation.** Omitting `viewport` resets it and omitting
   `networkConditions` drops throttling, so pass every setting you want in one call. `emulate` with
