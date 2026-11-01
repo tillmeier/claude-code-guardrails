@@ -1,6 +1,6 @@
 ---
 name: browser-mcp
-description: Read before the first chrome-devtools-mcp call in a session (an isolated server such as mcp__chrome-devtools__*, or one attached to your real Chrome). Which server for what, token-cheap check order, filePath roots, wait_for / emulate / screenshot pitfalls, tab hygiene, secrets in pages. Not for the Claude-in-Chrome extension.
+description: Read before the first chrome-devtools-mcp call in a session (an isolated server such as mcp__chrome-devtools__*, or one attached to your real Chrome). Which server for what, token-cheap check order, filePath roots, wait_for / emulate / screenshot pitfalls, tab hygiene, secrets in pages, browser memory per session. Not for the Claude-in-Chrome extension.
 ---
 
 # Browser MCP (chrome-devtools-mcp, measured on 1.10.1)
@@ -27,6 +27,9 @@ user's running Chrome), the setup the plugin README suggests. If yours have othe
   `ERR_INVALID_AUTH_CREDENTIALS` (CDP cancels the prompt). A `user:pass@host` redirect works, but
   the tab keeps the userinfo in its URL, and every `list_pages` / `new_page` / `select_page` prints
   it into the transcript. Let the user log in, or reload to a clean URL before any tab-listing call.
+  A redirect leaks the same way: a call that triggers a navigation, `evaluate_script` included,
+  reports `Page navigated to <final URL>`, so an SSO login that lands on `#token=…` prints the
+  token. Let the user run such a login, or plan to rotate whatever lands in the URL.
 - **Snapshots contain what the page shows**: a password-manager entry's notes, a revealed password
   field. Save big snapshots to a file and grep them for uids only. Don't snapshot a filled password
   field, and if you did, delete the file.
@@ -97,6 +100,29 @@ screenshots took about 40 % of all browser-tool context.
   of the logins.
 - To see what the user looked up in a tab, run `navigation.entries()` in that tab. It lists the
   tab's same-origin back stack, read-only and without navigating.
+
+## Browser lifetime and memory
+- A stdio MCP server runs once per session, and an isolated server holds one Chrome with its own
+  temp profile. Every session that has used a browser tool keeps that Chrome until the session
+  ends. Measured per instance: about 0.2 GiB idle, up to 0.65 GiB with a page loaded, and nine
+  sessions held 6 GiB. Treat these as a range, not a constant: Chrome reaps background renderers,
+  so any single sample is a peak or a trough.
+- Nothing in the tool set releases it: `close_page` refuses the last open page and there is no
+  close-browser tool (1.10.1). `--headless` saves no memory (measured: same size, same process
+  count).
+- A fixed `--user-data-dir` shared by all sessions is not the fix either. Chrome locks the profile,
+  so the second session fails with "The browser is already running for <dir>. Use --isolated to
+  run multiple browser instances."
+- When the user asks to reclaim that memory: `kill -TERM` the browser's main process by PID, the
+  one whose command has `--user-data-dir=…puppeteer_dev_chrome_profile-…` and no `--type=`. The
+  server starts a fresh browser on its next call ("browser was restarted… Page ids have changed")
+  and Chrome deletes the temp profile. Open pages in that browser are lost, so ask before touching
+  another session's. Never kill by name pattern (`pkill -f`): it also hits renderers, the server
+  attached to the user's Chrome, and any process whose arguments merely contain the string.
+- Only that clean shutdown removes the temp profile. Sessions that end any other way leave their
+  `puppeteer_dev_chrome_profile-*` directory in `$TMPDIR` (measured: 7 leftovers, 0.7 GB). When
+  the user asks to clean up, a directory is safe to delete only if no running process names it in
+  its `--user-data-dir`.
 
 ## Panels that fight the DOM
 - **A modal may be an `<iframe>`.** Queries on the parent `document` return nothing and look like

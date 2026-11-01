@@ -86,8 +86,11 @@ Each one cost real work in a repo several sessions used at once.
   untouched.
 - **Don't reuse a branch after its PR was squash-merged.** The next PR from that branch got no
   check run at all (`check-runs` → `total_count: 0`), so required checks never reported and
-  auto-merge waited forever. Branch fresh off `main` and `git checkout <old-branch> -- <paths>`;
-  merging `main` into the stale branch conflicts with the squashed copy of your own commit.
+  auto-merge waited forever. Branch fresh off `main` and `git cherry-pick` only the commits made
+  after the squash-merge: git applies their diffs and stops on a conflict.
+  `git checkout <old-branch> -- <paths>` would copy the stale branch's whole files and silently
+  revert anything `main` changed in them since. Merging `main` into the stale branch conflicts
+  with the squashed copy of your own commit.
 - **`git reset --soft` onto a moved `origin/main` reverts other people's merges.** The index still
   held the older tree, so one "fixtures" commit carried old versions of 11 files and would have
   undone four merged commits. Before merging a bulk PR, list what it changes beside the bulk
