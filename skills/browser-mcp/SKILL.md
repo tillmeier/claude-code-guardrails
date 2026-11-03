@@ -21,6 +21,9 @@ user's running Chrome), the setup the plugin README suggests. If yours have othe
   - If it can't connect at all, ask the user to check remote debugging at
     `chrome://inspect/#remote-debugging` (it can be off again after a Chrome restart). While it is
     on, any local process can attach to that browser. That trade-off is the user's call, not yours.
+- **A misspelled server flag does not stop the server.** It prints `Unknown arguments: --x` to
+  stderr, which Claude Code does not show, and starts without it. Check that a flag took effect by
+  its behaviour (screenshot size, which profile is in use), not by the server starting.
 
 ## Secrets
 - **Never put a secret into a URL or anything a tool echoes.** A Basic-Auth page fails with
@@ -104,9 +107,9 @@ screenshots took about 40 % of all browser-tool context.
 ## Browser lifetime and memory
 - A stdio MCP server runs once per session, and an isolated server holds one Chrome with its own
   temp profile. Every session that has used a browser tool keeps that Chrome until the session
-  ends. Measured per instance: about 0.2 GiB idle, up to 0.65 GiB with a page loaded, and nine
-  sessions held 6 GiB. Treat these as a range, not a constant: Chrome reaps background renderers,
-  so any single sample is a peak or a trough.
+  ends. Measured as summed RSS: about 0.2 GiB for one browser on `about:blank`, 4.9–6.0 GiB for
+  the browsers of nine sessions. Chrome reaps background renderers, so any single sample is a peak
+  or a trough.
 - Nothing in the tool set releases it: `close_page` refuses the last open page and there is no
   close-browser tool (1.10.1). `--headless` saves no memory (measured: same size, same process
   count).
