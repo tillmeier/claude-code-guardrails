@@ -26,23 +26,25 @@ NL=$'\n'
 # (the caller removes both files). A failed hash only empties the blobs file: the list stays complete
 # and every dirty path becomes LIKELY (not-snapshotted), the safe direction.
 snapshot_dirty() {
-  local raw rec p skip=0 paths="" existing shas
+  local raw lst rec p skip=0 existing shas
   raw=$(mktemp "${MARKER_DIR%/}/claude-snapshot.XXXXXX" 2>/dev/null) || return 1
+  lst=$(mktemp "${MARKER_DIR%/}/claude-snapshot.XXXXXX" 2>/dev/null) || { rm -f "$raw"; return 1; }
   if ! git -C "$1" status --porcelain -z --untracked-files=all > "$raw" 2>/dev/null; then
-    rm -f "$raw"; return 1
+    rm -f "$raw" "$lst"; return 1
   fi
   # -z records: "XY path"; a rename or copy is followed by one more record, the old path (man git-status).
+  # Streamed into a file: appending to a shell string copies it each time (9 s for 5,000 paths on bash 3.2).
   while IFS= read -r -d '' rec; do
     if [ "$skip" -eq 1 ]; then skip=0; continue; fi
     p=${rec:3}
     case "${rec:0:2}" in *R*|*C*) skip=1 ;; esac
-    case "$p" in ""|*"$NL"*|*$'\t'*) rm -f "$raw"; return 1 ;; esac   # the files are line- and TAB-separated
-    paths="${paths}${p}${NL}"
-  done < "$raw"
+    case "$p" in ""|*"$NL"*|*$'\t'*) rm -f "$raw" "$lst"; return 1 ;; esac   # the files are line- and TAB-separated
+    printf '%s\n' "$p"
+  done < "$raw" > "$lst" || { rm -f "$raw" "$lst"; return 1; }
   rm -f "$raw"
-  printf '%s' "$paths" > "$2" 2>/dev/null && : > "$3" 2>/dev/null || return 1
+  mv "$lst" "$2" 2>/dev/null && : > "$3" 2>/dev/null || { rm -f "$lst"; return 1; }
   # regular files only — never hash through a symlink (its target may live outside the repo)
-  existing=$(printf '%s' "$paths" | while IFS= read -r p; do [ ! -L "$1/$p" ] && [ -f "$1/$p" ] && printf '%s\n' "$p"; done)
+  existing=$(while IFS= read -r p; do [ ! -L "$1/$p" ] && [ -f "$1/$p" ] && printf '%s\n' "$p"; done < "$2")
   [ -n "$existing" ] || return 0
   # "./" prefix: --stdin-paths C-unquotes a line that starts with a double quote, so a file named
   # "x.txt" (quotes included) would be hashed as x.txt — a wrong blob with matching counts.

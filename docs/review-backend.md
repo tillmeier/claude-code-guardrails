@@ -81,6 +81,11 @@ Found by a parallel session on 2026-11-04, then reproduced in a scratch repo her
   session dirties later is `FULL` too. The command now moves a `FULL` path the conversation never
   wrote to `LIKELY (not-written-here)`. That check is judgement, not code; the snapshot fixes stay.
 - Each new test was run against the old code first and failed on its intended assertion.
+- **v0.5.3, found by the release review:** the v0.5.2 hook collected paths with
+  `paths="${paths}${p}${NL}"`, which copies the string on every append. At 5,000 untracked files
+  under bash 3.2 the session start took 9.1 s (v0.5.1: 0.6–1.0 s). The parse loop now writes to a
+  temp file that is moved into place: 1.1 s, byte-identical output. In a hook, build lists in a
+  file, not in a shell string.
 
 ## Gotchas found while building
 
