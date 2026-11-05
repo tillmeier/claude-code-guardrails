@@ -58,6 +58,30 @@ The README says what the pieces do; this is the why and the numbers.
 - **Rejected:** folding the compaction read-back into `session-start.sh` (separate script keeps
   the private drift pair 1:1).
 
+## v0.5.2: a dirty list is complete or absent
+
+`scope-delta.sh` calls every path missing from the dirty list `FULL`: this session's work, in scope
+and auto-fixable. So an incomplete list hands another session's uncommitted edits to the auto-fixer.
+Found by a parallel session on 2026-11-04, then reproduced in a scratch repo here:
+
+- **The session-start snapshot dropped every path git quotes** (`grep -v '^"'`): `ü.txt` and
+  `q"x.txt`, dirty before the session, came back `FULL` with whole-file hunks. The old comment claimed
+  the opposite. Now `git status -z`, paths verbatim.
+- **A failed `git status` left both baseline files empty**, which reads as "tree was clean". A corrupt
+  index does it naturally: `rev-parse HEAD` works, `status` exits 128. Now neither file is written,
+  scope-delta exits 2 and the command takes the gitStatus fallback. Same for a path with a newline or TAB.
+- **`git hash-object --stdin-paths` C-unquotes a line that starts with `"`** (git 2.39.5): a file
+  literally named `"x.txt"` was hashed as `x.txt`, with matching counts and rc 0, so the pairing
+  guard never fired. Every path is fed as `./<path>`.
+- **Phase 6 had the same parser, and there the "safe" empty file was unsafe.** Its blobs file was
+  the next review's only dirty list, so a hash mismatch emptied it and every dirty path came back
+  `FULL`. The last-review baseline is now a dirty/blobs pair like the session-start one, written
+  whole or not at all. Whether an empty artefact is the safe direction depends on how its reader reads it.
+- **Even a complete list says nothing about authorship**: a file clean at session start that another
+  session dirties later is `FULL` too. The command now moves a `FULL` path the conversation never
+  wrote to `LIKELY (not-written-here)`. That check is judgement, not code; the snapshot fixes stay.
+- Each new test was run against the old code first and failed on its intended assertion.
+
 ## Gotchas found while building
 
 - `${CLAUDE_SESSION_ID}` and `${CLAUDE_PLUGIN_ROOT}` are substituted into command text by the

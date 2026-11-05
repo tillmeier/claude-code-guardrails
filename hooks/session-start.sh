@@ -20,6 +20,40 @@
 set -uo pipefail
 
 MARKER_DIR="${TMPDIR:-/tmp}"
+NL=$'\n'
+
+# Writes the dirty list ($2) and the blob pairs ($3) for repo $1. Non-zero = no trustworthy list
+# (the caller removes both files). A failed hash only empties the blobs file: the list stays complete
+# and every dirty path becomes LIKELY (not-snapshotted), the safe direction.
+snapshot_dirty() {
+  local raw rec p skip=0 paths="" existing shas
+  raw=$(mktemp "${MARKER_DIR%/}/claude-snapshot.XXXXXX" 2>/dev/null) || return 1
+  if ! git -C "$1" status --porcelain -z --untracked-files=all > "$raw" 2>/dev/null; then
+    rm -f "$raw"; return 1
+  fi
+  # -z records: "XY path"; a rename or copy is followed by one more record, the old path (man git-status).
+  while IFS= read -r -d '' rec; do
+    if [ "$skip" -eq 1 ]; then skip=0; continue; fi
+    p=${rec:3}
+    case "${rec:0:2}" in *R*|*C*) skip=1 ;; esac
+    case "$p" in ""|*"$NL"*|*$'\t'*) rm -f "$raw"; return 1 ;; esac   # the files are line- and TAB-separated
+    paths="${paths}${p}${NL}"
+  done < "$raw"
+  rm -f "$raw"
+  printf '%s' "$paths" > "$2" 2>/dev/null && : > "$3" 2>/dev/null || return 1
+  # regular files only — never hash through a symlink (its target may live outside the repo)
+  existing=$(printf '%s' "$paths" | while IFS= read -r p; do [ ! -L "$1/$p" ] && [ -f "$1/$p" ] && printf '%s\n' "$p"; done)
+  [ -n "$existing" ] || return 0
+  # "./" prefix: --stdin-paths C-unquotes a line that starts with a double quote, so a file named
+  # "x.txt" (quotes included) would be hashed as x.txt — a wrong blob with matching counts.
+  shas=$(printf '%s\n' "$existing" | sed 's#^#./#' | git -C "$1" hash-object -w --stdin-paths 2>/dev/null) || shas=""
+  # Only trust the pairing when every path produced a sha; otherwise the blobs file stays empty.
+  if [ "$(printf '%s\n' "$shas" | grep -c .)" -eq "$(printf '%s\n' "$existing" | grep -c .)" ]; then
+    paste <(printf '%s\n' "$shas") <(printf '%s\n' "$existing") > "$3" 2>/dev/null || : > "$3"
+  fi
+  return 0
+}
+
 INPUT=$(cat)
 
 PARSED=$(printf '%s' "$INPUT" | python3 -c 'import sys, json
@@ -60,35 +94,22 @@ if [ -n "$HEAD_COMMIT" ]; then
   #   claude-session-start-dirty-<sid>   one repo-root-relative path per line (renames: the new path)
   #   claude-session-start-blobs-<sid>   <blob sha>TAB<path> for every dirty path that is a regular file;
   #                                      hash-object -w so `git diff <sha> <sha>` resolves later
-  # Empty files mean "hook ran, tree was clean". No cap: one git process hashes all paths. Paths git
-  # quotes (quotes, control chars, non-ASCII under core.quotepath) are skipped and therefore land in
-  # /critical-review's "scope unverifiable" bucket rather than being mistaken for clean.
+  # Empty files mean "hook ran, tree was clean". No cap: one git process hashes all paths.
+  # The dirty list must be COMPLETE: scope-delta.sh calls any path missing from it FULL, i.e. this
+  # session's work. So the list is written only when `git status` succeeded and every path fits the
+  # line format; otherwise neither file exists, scope-delta exits 2 and /critical-review falls back
+  # to the gitStatus list. `-z` gives paths verbatim (no C-quoting of non-ASCII, quotes, backslashes).
   DIRTY_FILE="${MARKER_DIR}/claude-session-start-dirty-${SESSION_ID}"
   BLOBS_FILE="${MARKER_DIR}/claude-session-start-blobs-${SESSION_ID}"
-  if : > "$DIRTY_FILE" 2>/dev/null && : > "$BLOBS_FILE" 2>/dev/null; then
-    DIRTY_PATHS=$(git -C "$PROJECT_DIR" status --porcelain --untracked-files=all 2>/dev/null \
-      | sed -e 's/^...//' -e 's/^.* -> //' | grep -v '^"' | grep .)
-    if [ -n "$DIRTY_PATHS" ]; then
-      printf '%s\n' "$DIRTY_PATHS" > "$DIRTY_FILE"
-      # regular files only — never hash through a symlink (its target may live outside the repo)
-      EXISTING=$(printf '%s\n' "$DIRTY_PATHS" | while IFS= read -r p; do [ ! -L "$PROJECT_DIR/$p" ] && [ -f "$PROJECT_DIR/$p" ] && printf '%s\n' "$p"; done)
-      if [ -n "$EXISTING" ]; then
-        SHAS=$(printf '%s\n' "$EXISTING" | git -C "$PROJECT_DIR" hash-object -w --stdin-paths 2>/dev/null)
-        # Only trust the pairing when every path produced a sha; otherwise leave the blobs file empty
-        # and every dirty file becomes scope-unverifiable (safe direction).
-        if [ "$(printf '%s\n' "$SHAS" | grep -c .)" -eq "$(printf '%s\n' "$EXISTING" | grep -c .)" ]; then
-          paste <(printf '%s\n' "$SHAS") <(printf '%s\n' "$EXISTING") > "$BLOBS_FILE" 2>/dev/null || : > "$BLOBS_FILE"
-        fi
-      fi
-    fi
-  fi
+  snapshot_dirty "$PROJECT_DIR" "$DIRTY_FILE" "$BLOBS_FILE" || rm -f "$DIRTY_FILE" "$BLOBS_FILE" 2>/dev/null
 fi
 
 # GC session files older than 7 days (start markers, dirty/blob snapshots, /critical-review's
 # last-review marker, brief and dirty-list fallback). Trailing slash required on macOS — /tmp is a symlink to /private/tmp.
 find "${MARKER_DIR}/" -maxdepth 1 \( -name 'claude-session-start-commit-*' -o -name 'claude-session-start-dirty-*' \
   -o -name 'claude-session-start-blobs-*' -o -name 'claude-session-last-review-commit-*' \
+  -o -name 'claude-session-last-review-dirty-*' \
   -o -name 'claude-session-last-review-blobs-*' -o -name 'claude-review-brief-*' -o -name 'claude-review-result-*' \
-  -o -name 'claude-review-dirty-fallback-*' \) \
+  -o -name 'claude-review-dirty-fallback-*' -o -name 'claude-snapshot.*' \) \
   -mtime +7 -delete 2>/dev/null || true
 exit 0

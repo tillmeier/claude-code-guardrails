@@ -7,8 +7,8 @@
 #   scope-delta.sh [--dirty <list>] --blobs <file> [--now <rev>] -- <path>...
 #
 #   --dirty <list>  one repo-root-relative path per line: files already dirty at the baseline
-#                   (claude-session-start-dirty-<sid>, or the gitStatus fallback list). Omitted →
-#                   the paths of --blobs (the last-review baseline has no separate list).
+#                   (claude-session-{start,last-review}-dirty-<sid>, or the gitStatus fallback list).
+#                   Omitted → the paths of --blobs (a missing path then reads as FULL, not LIKELY).
 #   --blobs <file>  <blob sha>TAB<path> per line, the baseline content of the dirty files.
 #                   /dev/null = no snapshot (every dirty path becomes "not-snapshotted").
 #   --now <rev>     compare against <rev>:<path> instead of the working-tree file (a file that was

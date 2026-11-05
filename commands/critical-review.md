@@ -47,6 +47,7 @@ Session files (all keyed by `${CLAUDE_SESSION_ID}`, written under `${TMPDIR:-/tm
 | `claude-session-start-dirty-<sid>` | `hooks/session-start.sh` | paths already modified/untracked at session start |
 | `claude-session-start-blobs-<sid>` | `hooks/session-start.sh` | `<blob sha>TAB<path>` of each dirty file's content at session start |
 | `claude-session-last-review-commit-<sid>` | this command (Phase 6) | HEAD after the last review in this session |
+| `claude-session-last-review-dirty-<sid>` | this command (Phase 6) | paths modified/untracked at that review |
 | `claude-session-last-review-blobs-<sid>` | this command (Phase 6) | `<blob sha>TAB<path>` of each dirty file's content at that review |
 | `claude-review-brief-<sid>.md` | this command (Phase 1.5) | the conversation brief, never shown to the reviewer |
 | `claude-review-dirty-fallback-<sid>` | this command (Phase 1, only without a snapshot) | the opening gitStatus paths, the dirty list of last resort |
@@ -224,16 +225,17 @@ bash "$SD" --dirty "<dirty list>" --blobs "<blobs file>" -- <path> [<path> ...]
 
 **Baseline (`--dirty` / `--blobs`), default mode only:**
 
-- A review already ran in this session (Step C chose `REVIEW_BASE = MARKER`) and
-  `${TMPDIR:-/tmp}/claude-session-last-review-blobs-${CLAUDE_SESSION_ID}` exists → pass only
-  `--blobs <that file>` (its paths are the dirty list). A second review then covers only what changed
-  since the first, committed or not.
+- A review already ran in this session (Step C chose `REVIEW_BASE = MARKER`) and both
+  `${TMPDIR:-/tmp}/claude-session-last-review-dirty-${CLAUDE_SESSION_ID}` and
+  `…-last-review-blobs-${CLAUDE_SESSION_ID}` exist → pass that pair as `--dirty` / `--blobs`. A second
+  review then covers only what changed since the first, committed or not.
 - Otherwise the session-start pair: `--dirty ${TMPDIR:-/tmp}/claude-session-start-dirty-${CLAUDE_SESSION_ID}
   --blobs ${TMPDIR:-/tmp}/claude-session-start-blobs-${CLAUDE_SESSION_ID}`.
-- Exit 2 (a baseline file does not exist — no snapshot hook ran): write the paths from the "Status:"
-  section of the conversation's opening `gitStatus` message, one per line, to
-  `${TMPDIR:-/tmp}/claude-review-dirty-fallback-${CLAUDE_SESSION_ID}` and re-run with
-  `--dirty <that file> --blobs /dev/null`.
+- Exit 2 (a baseline file does not exist — no snapshot hook ran, or the hook could not take a complete
+  one): write the paths from the "Status:" section of the conversation's opening `gitStatus` message,
+  one per line, to `${TMPDIR:-/tmp}/claude-review-dirty-fallback-${CLAUDE_SESSION_ID}` — overwrite it
+  every run, never reuse one an earlier review left — and re-run with `--dirty <that file> --blobs /dev/null`.
+  Read the script's exit status directly: through `| head` you get head's 0 and miss the 2.
 
 **Explicit modes** (`--working-tree`, `--base`, `--session`, `--since`, `--feature`, `--final`): every
 uncommitted change is in scope as it stands — the user asked for the range, not for this session's
@@ -250,10 +252,17 @@ share of it — so pass `--dirty /dev/null --blobs /dev/null` (every path comes 
 
 `@@ -a,b +c,d @@` ranges are line-accurate against the file on disk. For every `LIKELY` path warn
 `⚠ <path>: <reason> — findings flagged as scope-unverifiable`; reasons are `not-snapshotted` (dirty
-at the baseline, no blob: hook older than the snapshot, a path git quotes, a file deleted at the
-time), `broken: …` (snapshot sha unusable, file gone, diff failed) and `no-text-hunks` (binary).
-Hard-dropping these would hide real findings on lines this session added; the tag keeps the user the
-arbiter.
+at the baseline, no blob: the gitStatus fallback, a failed hash, a file deleted or a symlink at the
+time), `broken: …` (snapshot sha unusable, file gone, diff failed), `no-text-hunks` (binary) and
+`not-written-here` (below). Hard-dropping these would hide real findings on lines this session added;
+the tag keeps the user the arbiter.
+
+**`FULL` is a claim about the baseline, not about authorship.** A file that was clean at the baseline
+and that another session has dirtied since also comes back `FULL`, and the baseline is as old as the
+session (kept across compaction and resume). In default mode, check every `FULL` path against this
+conversation the way Step 3b checks commits: if the conversation never wrote that file (no Edit/Write,
+no Bash command that writes it), move it to `LIKELY_IN_SCOPE_FILES` as `LIKELY <path> (not-written-here)`.
+Explicit modes skip this: there every uncommitted change is in scope by request.
 
 ```bash
 # Committed hunks — default mode: per OWN commit, so a commit another session interleaved inside
@@ -783,19 +792,39 @@ After Case 1 OR Case 2 (approved or denied), record the review point — HEAD *a
 uncommitted file — so a follow-up `/critical-review` in this session covers only what changed since:
 
 ```bash
+bash <<'SNAP'
 MARK_DIR="${TMPDIR:-/tmp}"
 git rev-parse HEAD > "$MARK_DIR/claude-session-last-review-commit-${CLAUDE_SESSION_ID}"
-BLOBS="$MARK_DIR/claude-session-last-review-blobs-${CLAUDE_SESSION_ID}"; : > "$BLOBS"
-DIRTY=$(git status --porcelain --untracked-files=all | sed -e 's/^...//' -e 's/^.* -> //' | grep -v '^"' | grep .)
-EXISTING=$(printf '%s\n' "$DIRTY" | while IFS= read -r p; do [ ! -L "$p" ] && [ -f "$p" ] && printf '%s\n' "$p"; done)   # never hash through a symlink
+DIRTY="$MARK_DIR/claude-session-last-review-dirty-${CLAUDE_SESSION_ID}"
+BLOBS="$MARK_DIR/claude-session-last-review-blobs-${CLAUDE_SESSION_ID}"
+rm -f "$DIRTY" "$BLOBS"      # written whole or not at all: a path missing from the list reads as FULL
+TD=$(mktemp) && TB=$(mktemp) && RAW=$(mktemp) || exit 0
+trap 'rm -f "$TD" "$TB" "$RAW"' EXIT
+git status --porcelain -z --untracked-files=all > "$RAW" || exit 0
+SKIP=0
+while IFS= read -r -d '' REC; do          # -z: paths verbatim; a rename/copy is followed by its old path
+  if [ "$SKIP" -eq 1 ]; then SKIP=0; continue; fi
+  P=${REC:3}
+  case "${REC:0:2}" in *R*|*C*) SKIP=1 ;; esac
+  case "$P" in ""|*$'\n'*|*$'\t'*) exit 0 ;; esac
+  printf '%s\n' "$P" >> "$TD"
+done < "$RAW"
+: > "$TB"
+EXISTING=$(while IFS= read -r P; do [ ! -L "$P" ] && [ -f "$P" ] && printf '%s\n' "$P"; done < "$TD")   # never hash through a symlink
 if [ -n "$EXISTING" ]; then
-  SHAS=$(printf '%s\n' "$EXISTING" | git hash-object -w --stdin-paths)
+  # ./ prefix: --stdin-paths C-unquotes a line that starts with a double quote
+  SHAS=$(printf '%s\n' "$EXISTING" | sed 's#^#./#' | git hash-object -w --stdin-paths) || SHAS=""
   [ "$(printf '%s\n' "$SHAS" | grep -c .)" -eq "$(printf '%s\n' "$EXISTING" | grep -c .)" ] \
-    && paste <(printf '%s\n' "$SHAS") <(printf '%s\n' "$EXISTING") > "$BLOBS"
+    && paste <(printf '%s\n' "$SHAS") <(printf '%s\n' "$EXISTING") > "$TB"
 fi
+mv "$TD" "$DIRTY" && mv "$TB" "$BLOBS" || rm -f "$DIRTY" "$BLOBS"
+SNAP
 ```
 
-(Same format and rules as the session-start snapshot in `hooks/session-start.sh`; run from the repo root.)
+(Same format and rules as the session-start snapshot in `hooks/session-start.sh`, which has the same
+parser — change both together; run from the repo root. It runs under `bash` whatever the login shell.
+A failed hash leaves the blobs file empty beside a complete list, so every dirty file becomes `LIKELY`;
+any other failure leaves no files and the next review falls back to the session-start pair.)
 
 No separate summary block — Phase 4c / Phase 5 already said everything.
 

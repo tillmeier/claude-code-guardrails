@@ -116,6 +116,41 @@ baseline_repo() {
   [[ "$output" == *"VERDICT FULL nosnap.txt"* ]]   # not in this baseline → whole diff vs HEAD is in scope
 }
 
+# The Phase 6 snapshot block of commands/critical-review.md, with the session id substituted the way
+# the harness does it.
+phase6_block() {
+  sed -n "/^bash <<'SNAP'\$/,/^SNAP\$/p" "$ROOT/commands/critical-review.md" | sed 's/\${CLAUDE_SESSION_ID}/test-p6/g'
+}
+
+@test "critical-review Phase 6: quoted, deleted and untracked paths all land in the last-review pair" {
+  [ -n "$(phase6_block)" ]
+  cd "$BATS_TEST_TMPDIR" && git init -q p6 && cd p6
+  printf 'inner\n' > x.txt; printf 'a\n' > "ü.txt"; printf 'a\n' > '"x.txt"'; printf 'g\n' > gone.txt
+  git add -- x.txt "ü.txt" '"x.txt"' gone.txt; git commit -qm init
+  printf 'r1\n' >> "ü.txt"; printf 'r1\n' >> '"x.txt"'; rm gone.txt; printf 'u\n' > new.txt   # dirty at review 1
+  run bash -c "$(phase6_block)"; [ "$status" -eq 0 ]
+  d="$BATS_TEST_TMPDIR/claude-session-last-review-dirty-test-p6"; b="$BATS_TEST_TMPDIR/claude-session-last-review-blobs-test-p6"
+  [ "$(sort "$d" | tr '\n' ' ')" = '"x.txt" gone.txt new.txt ü.txt ' ]
+  grep -Fxq "$(git hash-object -- '"x.txt"')"$'\t''"x.txt"' "$b"      # hashed as itself, not as x.txt
+  [ -s "$BATS_TEST_TMPDIR/claude-session-last-review-commit-test-p6" ]
+  # review 2, nothing changed since review 1: nothing may come back as FULL
+  run bash "$SD" --dirty "$d" --blobs "$b" -- "ü.txt" '"x.txt"' gone.txt new.txt
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^VERDICT FULL ')" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^VERDICT UNCHANGED ')" -eq 3 ]
+  [ "$(printf '%s\n' "$output" | grep -cFx 'VERDICT LIKELY gone.txt (not-snapshotted)')" -eq 1 ]
+}
+
+@test "critical-review Phase 6: a failing git status leaves no last-review pair, never an empty one" {
+  cd "$BATS_TEST_TMPDIR" && git init -q p6b && cd p6b
+  printf 'a\n' > f.txt; git add f.txt; git commit -qm init; printf 'r1\n' >> f.txt
+  d="$BATS_TEST_TMPDIR/claude-session-last-review-dirty-test-p6"; b="$BATS_TEST_TMPDIR/claude-session-last-review-blobs-test-p6"
+  printf 'stale\n' > "$d"; : > "$b"                     # left by an earlier review
+  printf 'garbage' > .git/index
+  run bash -c "$(phase6_block)"; [ "$status" -eq 0 ]
+  [ ! -e "$d" ]; [ ! -e "$b" ]
+}
+
 @test "scope-delta: usage errors and a missing baseline file print nothing on stdout" {
   baseline_repo sd8
   run bash -c "bash '$SD' 2>/dev/null"; [ "$status" -eq 1 ]; [ -z "$output" ]

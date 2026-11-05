@@ -245,6 +245,52 @@ new_repo() {  # $1 = name; leaves you inside a fresh repo with one commit
   [ -f "$d" ] && [ ! -s "$d" ]; [ -f "$b" ] && [ ! -s "$b" ]
 }
 
+@test "session-start: paths git would quote stay in the snapshot with their own blob — never read as clean" {
+  new_repo ss7
+  printf 'inner\n' > x.txt; printf 'a\n' > "ü.txt"; printf 'a\n' > 'q"x.txt'; printf 'a\n' > '"x.txt"'
+  git add -- x.txt "ü.txt" 'q"x.txt' '"x.txt"'; git commit -qm add
+  printf 'pre\n' >> "ü.txt"; printf 'pre\n' >> 'q"x.txt'; printf 'pre\n' >> '"x.txt"'   # dirty before the session
+  run env TMPDIR="$BATS_TEST_TMPDIR" bash -c "printf '%s' '{\"session_id\":\"test-sid-7\",\"cwd\":\"$PWD\"}' | bash '$START'"
+  [ "$status" -eq 0 ]
+  d="$BATS_TEST_TMPDIR/claude-session-start-dirty-test-sid-7"; b="$BATS_TEST_TMPDIR/claude-session-start-blobs-test-sid-7"
+  grep -Fxq "ü.txt" "$d"; grep -Fxq 'q"x.txt' "$d"; grep -Fxq '"x.txt"' "$d"
+  # a name starting with a quote is hashed as itself, not C-unquoted into x.txt
+  grep -Fxq "$(git hash-object -- '"x.txt"')"$'\t''"x.txt"' "$b"
+  [ "$(grep -c "^$(git hash-object x.txt)"$'\t' "$b")" -eq 0 ]
+  # the consumer: unchanged pre-dirty files are UNCHANGED, not this session's FULL work
+  run bash "$ROOT/scripts/scope-delta.sh" --dirty "$d" --blobs "$b" -- "ü.txt" 'q"x.txt' '"x.txt"'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^VERDICT UNCHANGED ')" -eq 3 ]
+}
+
+@test "session-start: a failing git status leaves NO snapshot (scope-delta exits 2), never an empty one" {
+  new_repo ss8
+  printf 'a\n' > f.txt; git add f.txt; git commit -qm add
+  printf 'pre\n' >> f.txt
+  printf 'garbage' > .git/index                         # rev-parse HEAD still works, status exits 128
+  git rev-parse HEAD >/dev/null
+  run git status --porcelain; [ "$status" -ne 0 ]
+  run env TMPDIR="$BATS_TEST_TMPDIR" bash -c "printf '%s' '{\"session_id\":\"test-sid-8\",\"cwd\":\"$PWD\"}' | bash '$START'"
+  [ "$status" -eq 0 ]
+  [ -s "$BATS_TEST_TMPDIR/claude-session-start-commit-test-sid-8" ]
+  [ ! -e "$BATS_TEST_TMPDIR/claude-session-start-dirty-test-sid-8" ]
+  [ ! -e "$BATS_TEST_TMPDIR/claude-session-start-blobs-test-sid-8" ]
+  [ -z "$(ls "$BATS_TEST_TMPDIR" | grep '^claude-snapshot\.' || true)" ]   # temp file cleaned up
+  git read-tree HEAD
+  run bash "$ROOT/scripts/scope-delta.sh" --dirty "$BATS_TEST_TMPDIR/claude-session-start-dirty-test-sid-8" \
+    --blobs "$BATS_TEST_TMPDIR/claude-session-start-blobs-test-sid-8" -- f.txt
+  [ "$status" -eq 2 ]
+}
+
+@test "session-start: a path with a newline cannot be listed, so there is no snapshot" {
+  new_repo ss9
+  printf 'a\n' > "$(printf 'two\nlines.txt')"
+  run env TMPDIR="$BATS_TEST_TMPDIR" bash -c "printf '%s' '{\"session_id\":\"test-sid-9\",\"cwd\":\"$PWD\"}' | bash '$START'"
+  [ "$status" -eq 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/claude-session-start-dirty-test-sid-9" ]
+  [ ! -e "$BATS_TEST_TMPDIR/claude-session-start-blobs-test-sid-9" ]
+}
+
 @test "session-start: a re-fire for the same session id (compact / resume) keeps the original baseline" {
   new_repo ss6
   first=$(git rev-parse HEAD)

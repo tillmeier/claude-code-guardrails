@@ -55,6 +55,21 @@ is — and observe behavior against the focus hint.
 - If the change can't be driven locally (prod-only path, external dependency), say so explicitly
   and state the **strongest** check you actually ran — never dress up "looks right" as verified.
 
+**A passing check can pass for the wrong reason.** Before it counts as evidence:
+
+- **Run the negative control.** Break the change on purpose (or feed a known-bad input) and watch the
+  check go red. Build the broken copy from the CURRENT code, and confirm the red lands on the
+  assertion you meant: a stale copy that dies in argument parsing is also red, and proves nothing.
+- **A control another guard would stop anyway is a placebo.** When several guards produce the same
+  safe outcome, assert the one you rely on — the value or message it alone produces.
+- **Shared state** (anything under `$HOME`, well-known tmp paths, a database other processes use):
+  run against an isolated copy (`HOME=$(mktemp -d)`). To show a test left shared files alone, diff
+  against a copy taken first and look for your own fixture tokens; never compare sizes, which other
+  writers change legitimately.
+- **Confining one pass of a multi-pass script confines only that pass.** Say which one you confined.
+- **Your change or the environment?** When a check against live state goes red, run the previous
+  version (`git show <old>:<path>`) against the same state, interleaved with the new one.
+
 **`--ui` mode** — frontend iteration loop instead of a single pass. Use for visual/UX changes where
 "correct" is what it looks like across breakpoints, not what a function returns. It needs a
 browser-automation MCP (built against the chrome-devtools MCP). **If none is available in this
