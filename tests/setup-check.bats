@@ -65,7 +65,7 @@ all_present() {
   run bash "$SC"
   [ "$status" -eq 0 ]
   has "✓ git: git version"; has "✓ python3: Python 3"
-  has "✓ /critical-review reviewer: codex gpt-6.1-sol (codex login checked)"
+  has "✓ /critical-review reviewer: codex gpt-6.2-sol (codex login checked)"
   has "✓ Codex plugin for /plan --codex: enabled"
   has "✓ node v22.12.0"; has "✓ Chrome 156.0.1.2 ("
   has "✓ browser server 'chrome-devtools' (isolated profile): MCP handshake ok, browser launch not tested"

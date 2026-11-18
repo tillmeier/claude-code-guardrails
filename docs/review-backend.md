@@ -30,11 +30,14 @@ The README says what the pieces do; this is the why and the numbers.
   absent that, the model default — low for gpt-5.6-sol. The script passes
   `-c model_reasoning_effort=<pin>` on both codex paths; verified that the override shows in the run
   header and that an invalid value fails the request instead of falling back.
-- **Default codex model `gpt-6.1-sol` since v0.3.0** (was gpt-5.6-sol). Mind the renaming: in the
-  GPT-6 family `sol` is the mid tier (`astra` = flagship at about 5x the price, `luna` = small),
-  unlike 5.6 where `sol` was the top. On a seeded-bug diff 6.1-sol, 5.6-sol and 6-astra all found
-  4 of 4 (maintainer's measurement). Tested with codex CLI 0.160.0; 0.155 does not know the name.
-  Negative control (2026-10-20, CLI 0.160.0): `CODEX_REVIEW_MODEL=gpt-bogus-0` through the script →
+- **Default codex model `gpt-6.2-sol` since v0.6.0** (was gpt-6.1-sol since v0.3.0, before that
+  gpt-5.6-sol). Mind the renaming: in the GPT-6 family `sol` is the mid tier (`astra` = flagship,
+  `luna` = small), unlike 5.6 where `sol` was the top. On a diff with four planted bugs 6.2-sol
+  found 4 of 4 through this script, and 6.1-sol had found the same four (maintainer's measurement,
+  2026-11-18, one run each). Tested with codex CLI 0.170.0; 0.163 does not know the name (400
+  `model_not_found`), the versions in between are untested. To stay on the old model, set
+  `CODEX_REVIEW_MODEL="gpt-6.1-sol"` in the conf.
+  Negative control (2026-11-18, CLI 0.170.0): `CODEX_REVIEW_MODEL=gpt-bogus-0` through the script →
   codex prints the 400 and exits 1, the script exits 4 with empty stdout. CLIs up to 0.155 exit 0 on
   that 400; the script then relies on the empty `-o` file (exit 4 "no final message written") —
   untested on an old CLI, so update codex or pin a model it knows.
@@ -132,6 +135,8 @@ Found by a parallel session on 2026-11-04, then reproduced in a scratch repo her
 | `codex exec review --base 34ec8c7`, v0.3.0 (20 files) | gpt-6.1-sol, effort high | — | 1 real finding (the pipefail bug above); re-review of the fix and a third native pass clean |
 | bogus model through the script (`CODEX_REVIEW_MODEL=gpt-bogus-0`) | CLI 0.160.0 | seconds | codex exit 1 → script exit 4, empty stdout |
 | bats suite (78 tests) | — | — | bash 5.3 and 3.2 |
+| `--scope working-tree`, 1-file diff with 4 planted bugs, v0.6.0 | gpt-6.2-sol, effort high, CLI 0.170.0 | 58 s | 4 of 4 found, plus a rounding regression |
+| bogus model through the script (`CODEX_REVIEW_MODEL=gpt-bogus-0`) | CLI 0.170.0 | 6 s | codex exit 1 → script exit 4, empty stdout |
 
 ## What the reviewers found in the port itself
 
