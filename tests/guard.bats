@@ -95,6 +95,15 @@ new_repo() {  # $1 = name; leaves you inside a fresh repo with one commit
   run hook_bash "$GUARD" 'git add src/a.sh 2>&1'; allowed
 }
 
+@test "git guard: a quoted redirect target with spaces is not a pathspec; a quoted path is one word" {
+  run hook_bash "$GUARD" 'git add -A 2> "build output.log"'; blocked
+  run hook_bash "$GUARD" "git add -A > 'my log.txt' 2>&1"; blocked
+  run hook_bash "$GUARD" 'git add -u 2>"a b c.log"'; blocked
+  run hook_bash "$GUARD" 'git add -A "."'; blocked
+  run hook_bash "$GUARD" 'git add -A "docs/my file.md" src/x.py'; allowed
+  run hook_bash "$GUARD" 'git add "docs/my file.md" > "out put.log"'; allowed
+}
+
 @test "git guard: a redirect or comment after a sweep is not a pathspec (review 2026-11-19)" {
   for cmd in 'git add -A 2>&1' 'git add -A >/dev/null' 'git add -A > log.txt' 'git add -u 2>/dev/null' 'git add --all # stage'; do
     run hook_bash "$GUARD" "$cmd"
@@ -164,6 +173,13 @@ new_repo() {  # $1 = name; leaves you inside a fresh repo with one commit
   run hook_bash "$SQL" 'mysql -e "DELETE FROM users;" | cat'; blocked
   run hook_bash "$SQL" "psql -c 'DELETE FROM app.users' > out.txt"; blocked
   run hook_bash "$SQL" 'mysql -e "DELETE FROM users; SELECT 1"'; blocked
+}
+
+@test "sql guard: a shell-escaped backtick name is still a table name" {
+  run hook_bash "$SQL" 'mysql -e "DELETE FROM \`users\`"'; blocked
+  run hook_bash "$SQL" 'mysql -e "DELETE FROM \`app\`.\`users\`" 2>&1'; blocked
+  run hook_bash "$SQL" 'mysql -e "TRUNCATE \`users\`"'; blocked
+  run hook_bash "$SQL" 'mysql -e "DELETE FROM \`users\` WHERE id = 1"'; allowed
 }
 
 @test "sql guard: blocks a WHERE-less DELETE on a shell-escaped quoted identifier" {

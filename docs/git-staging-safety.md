@@ -97,6 +97,13 @@ Probed against the shipped hooks; each new test failed on the old code first.
 - v0.6.4: the same replay, read the other way, showed a regression of v0.6.1: the old `\S+` took
   any token as the table name, the new name pattern did not know interpolation, so
   `f"DELETE FROM {t}"` and `"DELETE FROM ${TABLE}"` passed. `{`, `}` and `%` now belong to a name.
+- v0.6.5: a model review of the v0.6.1 to v0.6.4 changes found two more spellings the old guards
+  blocked and the new ones let through, neither of which occurs in the replayed calls:
+  `git add -A 2> "build output.log"` (the redirect target was split at the space and its second
+  half counted as a pathspec; redirects are now removed with a quoted target, and words are split
+  quote-aware), and `mysql -e "DELETE FROM \`users\`"` (a backtick name escaped for the shell was
+  not a table name). The replay and the review find different things: the replay only knows the
+  spellings people used, the review only the ones it thinks of. Run both.
 - How the replay works: every Bash command the sessions really ran (from the transcripts, filtered
   by each record's own timestamp) goes through the old and the candidate script, and the exit codes
   are compared in both directions. "Newly blocked" finds false positives, "released" finds

@@ -97,21 +97,18 @@ EXCLUDE = re.compile(r"^:(\(exclude|\(top,exclude|!|\^)")
 for seg in segments:
     m = re.search(GIT_PREFIX + r"add(\s+.*)?$", seg)
     if m:
-        # Per token, quotes stripped; everything after a bare `--` is a pathspec. Shell-only tokens
-        # never reach git, so they must not count as a narrowing pathspec: a comment ends the list,
-        # and a redirect (`2>&1`, `>/dev/null`, `> log`) is dropped with its target.
-        raw = [t.rstrip(")}").strip("'\"") for t in re.split(r"\s+", (m.group(1) or "").strip()) if t]
-        tokens, skip = [], False
-        for t in raw:
-            if skip:
-                skip = False
-                continue
+        # Per shell word, quotes stripped; everything after a bare `--` is a pathspec. Shell-only
+        # parts never reach git, so they must not count as a narrowing pathspec: a redirect goes
+        # with its target (`2>&1`, `>/dev/null`, `> log`, and a quoted target with spaces,
+        # `2> "build output.log"`), and a comment ends the list. Words are split quote-aware, so a
+        # quoted path with spaces stays one word.
+        WORD = r'''"[^"]*"|'[^']*'|\S+'''
+        args = re.sub(r"(?:^|(?<=\s))[0-9&]*(?:>>?|<)&?[ \t]*(?:" + WORD + r")?", " ", m.group(1) or "")
+        tokens = []
+        for t in re.findall(WORD, args):
             if t.startswith("#"):
                 break
-            if re.match(r"[0-9&]*[<>]", t):
-                skip = re.fullmatch(r"[0-9&]*(>>?|<)", t) is not None   # bare operator: target follows
-                continue
-            tokens.append(t)
+            tokens.append(t.rstrip(")}").strip("'\""))
         if "--" in tokens:
             opts, specs = tokens[:tokens.index("--")], tokens[tokens.index("--") + 1:]
         else:
