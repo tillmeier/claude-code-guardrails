@@ -56,14 +56,18 @@ first_line() { sed -n '/./{p;q;}' "$1" 2>/dev/null | cut -c1-200; }
 # run_bounded <name> <cmd...>: stdout → $TMP/<name>, stderr → $TMP/<name>.err. Files, not a pipe, so
 # a grandchild that inherits them cannot keep a read open. TERM after LIMIT s, KILL 2 s later,
 # always by PID. Returns the command's status, or 124 on timeout.
+# Both waits are also capped by wall clock ($SECONDS): on a loaded machine each `sleep 0.1` round
+# takes longer than 0.1 s, and counting rounds alone stretched a 2 s limit + 2 s grace to 8 s.
 run_bounded() {
-  local out="$TMP/$1" pid i=0 j=0; shift
+  local out="$TMP/$1" pid i=0 j=0 t0 t1; shift
   "$@" >"$out" 2>"$out.err" </dev/null &
   pid=$!
+  t0=$SECONDS
   while kill -0 "$pid" 2>/dev/null; do
-    if [ $i -ge $((LIMIT * 10)) ]; then
+    if [ $i -ge $((LIMIT * 10)) ] || [ $((SECONDS - t0)) -ge "$LIMIT" ]; then
       kill -TERM "$pid" 2>/dev/null
-      while kill -0 "$pid" 2>/dev/null && [ $j -lt 20 ]; do sleep 0.1; j=$((j+1)); done
+      t1=$SECONDS
+      while kill -0 "$pid" 2>/dev/null && [ $j -lt 20 ] && [ $((SECONDS - t1)) -lt 2 ]; do sleep 0.1; j=$((j+1)); done
       kill -KILL "$pid" 2>/dev/null
       wait "$pid" 2>/dev/null
       return 124

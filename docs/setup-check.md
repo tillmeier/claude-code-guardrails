@@ -30,7 +30,9 @@ facts the parser rests on, as of v0.5.0.
   resolves into the stub dir (`SETUP_CHECK_STUB_DIR`, default `/usr/bin`) in that case.
 - Every external call goes through `run_bounded`: output to a file (a surviving grandchild can't hold
   a pipe open), TERM then KILL by PID after 2 s, `SETUP_CHECK_TIMEOUT` (default 20 s). Never a
-  pattern kill.
+  pattern kill. Both waits are capped by `$SECONDS` too (v0.6.2): counting `sleep 0.1` rounds alone
+  stretched a 2 s limit + 2 s grace to 8 s on a loaded machine (the first macOS CI run, reproduced
+  locally with 40 busy loops; the round count only bounds it on an idle box).
 - `claude mcp list` is the only source covering user, project, local and plugin scope. It starts
   every configured server for a health check (~4 s here), as each session start does; an `npx`
   server may fetch its package then. Lines look like `name: command args - ✔ Connected`; with no
