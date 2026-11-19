@@ -89,11 +89,19 @@ Probed against the shipped hooks; each new test failed on the old code first.
   needed the line to end there. `TRUNCATE t` without `TABLE` passed too; MySQL and Postgres accept it.
   The bare form counts only at a statement start, so a commit message ending in "fix truncate
   behavior" passes; a shell-escaped identifier (`\"User\"`) counts as a table name.
-- v0.6.3: a replay of three days of real Bash calls through the v0.6.1 pattern showed one new class
-  of false blocks, a search for the statement: `grep -E "x|DELETE FROM t|y"`. A `|` now ends the
-  statement only after whitespace (`… FROM t | cat`); glued to the table name it is a regex
+- v0.6.3: a replay of real Bash calls through the v0.6.1 pattern showed one new class of false
+  blocks, a search for the statement: `grep -E "x|DELETE FROM t|y"` (7 in 30 days). A `|` now ends
+  the statement only after whitespace (`… FROM t | cat`); glued to the table name it is a regex
   alternation. Residual, accepted: a pattern whose last alternative is the statement
   (`"x|DELETE FROM t"`) ends at the closing quote and is still blocked.
+- v0.6.4: the same replay, read the other way, showed a regression of v0.6.1: the old `\S+` took
+  any token as the table name, the new name pattern did not know interpolation, so
+  `f"DELETE FROM {t}"` and `"DELETE FROM ${TABLE}"` passed. `{`, `}` and `%` now belong to a name.
+- How the replay works: every Bash command the sessions really ran (from the transcripts, filtered
+  by each record's own timestamp) goes through the old and the candidate script, and the exit codes
+  are compared in both directions. "Newly blocked" finds false positives, "released" finds
+  regressions; hand-written tests found neither of the two above. Filter by record, not by file
+  date: a transcript touched this week can hold months of calls.
 
 ## More traps in shared checkouts (2026-10)
 

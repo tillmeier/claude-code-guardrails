@@ -42,8 +42,9 @@ cmd = (data.get("tool_input") or {}).get("command") or ""
 # there, so `mysql -e "DELETE FROM t" 2>&1` got through.
 # Inside a double-quoted shell argument a quoted identifier arrives escaped: `\"User\"`.
 # A `|` ends the statement only after whitespace (`… FROM t | cat`). Glued to the name it is a
-# regex alternation, `grep -E "x|DELETE FROM t|y"`: 5 false blocks in 3 days of real calls.
-NAME = r'(?:\\"[^"\\\n]+\\"|`[^`\n]+`|"[^"\n]+"|[\w$]+)'
+# regex alternation, `grep -E "x|DELETE FROM t|y"`: 7 false blocks in 30 days of real calls.
+# A name may be interpolated: `{t}` in an f-string, `${T}` in the shell, `%s`.
+NAME = r'(?:\\"[^"\\\n]+\\"|`[^`\n]+`|"[^"\n]+"|[\w${}%]+)'
 TABLE = NAME + r"(?:\." + NAME + r")*"
 STMT_END = r"(?:\s*(?=$|[;\"'`&<>)]|\\\")|\s+(?=\|))"
 # The bare form (no TABLE keyword) only counts at a statement start — line start, or right after

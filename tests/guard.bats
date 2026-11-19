@@ -194,6 +194,13 @@ new_repo() {  # $1 = name; leaves you inside a fresh repo with one commit
   run hook_bash "$SQL" 'psql -c "TRUNCATE users" | tail -1'; blocked
 }
 
+@test "sql guard: an interpolated table name is still a table name" {
+  run hook_bash "$SQL" 'python3 -c '"'"'db.execute_sql(f"DELETE FROM {t}")'"'"''; blocked
+  run hook_bash "$SQL" 'mysql db -e "DELETE FROM ${TABLE}"'; blocked
+  run hook_bash "$SQL" 'psql -c "TRUNCATE {schema}.{table}"'; blocked
+  run hook_bash "$SQL" 'mysql db -e "DELETE FROM ${TABLE} WHERE id = 1"'; allowed
+}
+
 @test "sql guard: allows DELETE with a WHERE clause and plain reads" {
   run hook_bash "$SQL" 'mysql -e "DELETE FROM users WHERE id = 1"'; allowed
   run hook_bash "$SQL" 'mysql -e "SELECT * FROM users"'; allowed
