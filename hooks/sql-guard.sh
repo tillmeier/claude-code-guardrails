@@ -3,8 +3,8 @@
 # sql-guard.sh — Claude Code PreToolUse hook (matcher: Bash).
 #
 # Blocks the three SQL spellings that destroy data without a WHERE clause when they appear in a Bash
-# tool call: DROP TABLE / DROP DATABASE, TRUNCATE TABLE, and DELETE FROM <table> with nothing after
-# the table name. A habit guard, not a sandbox: it inspects text, so `mysql -e "..."` and a heredoc
+# tool call: DROP TABLE / DROP DATABASE, TRUNCATE [TABLE] <table>, and DELETE FROM <table> with
+# nothing after the table name. A habit guard, not a sandbox: it inspects text, so `mysql -e "..."` and a heredoc
 # feeding a client are caught, an .sql file on disk is not, and a `grep "DROP TABLE"` is a false
 # positive (accepted — write such payloads with Edit/Write; this hook only sees Bash).
 #
@@ -36,10 +36,23 @@ if data.get("tool_name") != "Bash":
     sys.exit(0)
 cmd = (data.get("tool_input") or {}).get("command") or ""
 
+# A table name (optionally schema-qualified, backtick- or double-quoted), then the END of the SQL
+# statement: line end, `;`, the closing shell quote, or a shell operator (`2>&1`, `| cat`, `)`).
+# The old `\S+\s*;?\s*$` swallowed the closing quote into the name and needed the line to end
+# there, so `mysql -e "DELETE FROM t" 2>&1` got through.
+# Inside a double-quoted shell argument a quoted identifier arrives escaped: `\"User\"`.
+NAME = r'(?:\\"[^"\\\n]+\\"|`[^`\n]+`|"[^"\n]+"|[\w$]+)'
+TABLE = NAME + r"(?:\." + NAME + r")*"
+STMT_END = r"\s*(?=$|[;\"'`|&<>)]|\\\")"
+# The bare form (no TABLE keyword) only counts at a statement start — line start, or right after
+# `;`, a quote or `(` — so a commit message ending in "fix truncate behavior" is not SQL. Residual,
+# accepted: a two-word message such as -m "truncate output" still looks like a statement.
+STMT_START = r"(?:^|(?<=[;\"'`(]))\s*"
 PATTERN = re.compile(
-    r"DROP\s+(TABLE|DATABASE)\b"
-    r"|TRUNCATE\s+TABLE\b"
-    r"|DELETE\s+FROM\s+\S+\s*;?\s*$",   # nothing after the table name = no WHERE clause
+    r"\bDROP\s+(TABLE|DATABASE)\b"
+    r"|\bTRUNCATE\s+TABLE\b"
+    r"|" + STMT_START + r"TRUNCATE\s+" + TABLE + STMT_END +   # MySQL/Postgres accept TRUNCATE without TABLE
+    r"|\bDELETE\s+FROM\s+" + TABLE + STMT_END,               # nothing after the table name = no WHERE clause
     re.IGNORECASE | re.MULTILINE,
 )
 m = PATTERN.search(cmd)

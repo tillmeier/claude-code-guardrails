@@ -86,8 +86,32 @@ new_repo() {  # $1 = name; leaves you inside a fresh repo with one commit
   run hook_bash "$GUARD" 'git add -p src/'; allowed
 }
 
-@test "git guard: allows a sweep that carries an explicit -- pathspec section" {
+@test "git guard: allows a sweep narrowed by an exclude or by named paths after --" {
   run hook_bash "$GUARD" "git add -A -- . ':(exclude,literal)secret.env'"; allowed
+  run hook_bash "$GUARD" 'git add -u -- src/a.sh'; allowed
+  run hook_bash "$GUARD" 'git add -A -- src/'; allowed
+  run hook_bash "$GUARD" 'git add -N new.txt'; allowed
+  run hook_bash "$GUARD" 'git add --chmod=+x hooks/x.sh'; allowed
+  run hook_bash "$GUARD" 'git add src/a.sh 2>&1'; allowed
+}
+
+@test "git guard: a redirect or comment after a sweep is not a pathspec (review 2026-11-19)" {
+  for cmd in 'git add -A 2>&1' 'git add -A >/dev/null' 'git add -A > log.txt' 'git add -u 2>/dev/null' 'git add --all # stage'; do
+    run hook_bash "$GUARD" "$cmd"
+    blocked
+  done
+}
+
+@test "git guard: allows a dry run, which stages nothing" {
+  run hook_bash "$GUARD" 'git add --dry-run -- .'; allowed
+  run hook_bash "$GUARD" 'git add -n .'; allowed
+}
+
+@test "git guard: blocks -u / --update and a whole-tree pathspec after -- (audit 2026-11-17)" {
+  for cmd in 'git add -u' 'git add --update' 'git add -uv' 'git add -u .' 'git -C /x add -u' 'git add -A -- .' 'git add -- .' 'git add -- :/'; do
+    run hook_bash "$GUARD" "$cmd"
+    blocked
+  done
 }
 
 @test "git guard: allows commit without implicit staging" {
@@ -133,6 +157,33 @@ new_repo() {  # $1 = name; leaves you inside a fresh repo with one commit
 @test "sql guard: blocks DELETE FROM with no WHERE clause" {
   run hook_bash "$SQL" 'mysql -e "DELETE FROM users"'; blocked
   run hook_bash "$SQL" 'mysql -e "DELETE FROM users;"'; blocked
+}
+
+@test "sql guard: blocks a WHERE-less DELETE followed by a redirect, pipe or second statement" {
+  run hook_bash "$SQL" 'mysql -e "DELETE FROM users" 2>&1'; blocked
+  run hook_bash "$SQL" 'mysql -e "DELETE FROM users;" | cat'; blocked
+  run hook_bash "$SQL" "psql -c 'DELETE FROM app.users' > out.txt"; blocked
+  run hook_bash "$SQL" 'mysql -e "DELETE FROM users; SELECT 1"'; blocked
+}
+
+@test "sql guard: blocks a WHERE-less DELETE on a shell-escaped quoted identifier" {
+  run hook_bash "$SQL" 'psql -c "DELETE FROM \"User\""'; blocked
+  run hook_bash "$SQL" 'psql -c "DELETE FROM public.\"User\"" 2>&1'; blocked
+  run hook_bash "$SQL" 'bash -c "psql -c \"DELETE FROM users\""'; blocked
+}
+
+@test "sql guard: blocks TRUNCATE without the TABLE keyword" {
+  run hook_bash "$SQL" 'mysql -e "TRUNCATE users"'; blocked
+  run hook_bash "$SQL" 'mysql -e "truncate sessions;" 2>&1'; blocked
+  run hook_bash "$SQL" 'mysql -e "SET x=1; TRUNCATE t"'; blocked
+}
+
+@test "sql guard: allows truncate(1) and prose that only mentions delete or truncate" {
+  run hook_bash "$SQL" 'truncate -s 0 app.log'; allowed
+  run hook_bash "$SQL" 'git commit -m "Delete from cache when stale"'; allowed
+  run hook_bash "$SQL" 'git commit -m "truncate long lines in the log"'; allowed
+  run hook_bash "$SQL" 'git commit -m "Fix truncate behavior"'; allowed
+  run hook_bash "$SQL" 'mysql -e "DELETE FROM users WHERE id = 1" 2>&1'; allowed
 }
 
 @test "sql guard: allows DELETE with a WHERE clause and plain reads" {

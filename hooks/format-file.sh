@@ -14,7 +14,7 @@
 #   3. None found                  → skip
 #
 # .md/.yaml/.yml in a Biome-only project → skip (Biome v2 can't format them).
-# .py / .php use their standard global toolchains (black/ruff/isort, php-cs-fixer).
+# .py / .php use their standard global toolchains (black or `ruff format`, isort, php-cs-fixer).
 #
 # Kill switch: export CLAUDE_NO_FORMAT=1 to disable the hook entirely.
 
@@ -86,8 +86,13 @@ find_bin() {
 
 case "$fp" in
   *.py)
-    command -v black        >/dev/null 2>&1 && black --quiet "$fp"             >/dev/null 2>&1 || true
-    command -v ruff         >/dev/null 2>&1 && ruff check --fix --quiet "$fp"  >/dev/null 2>&1 || true
+    # Format only, never lint-fix: `ruff check --fix` deletes an import that the NEXT edit was
+    # about to use (F401), between two edits of the same change.
+    if command -v black >/dev/null 2>&1; then
+      black --quiet "$fp" >/dev/null 2>&1 || true
+    elif command -v ruff >/dev/null 2>&1; then
+      ruff format --quiet "$fp" >/dev/null 2>&1 || true
+    fi
     command -v isort        >/dev/null 2>&1 && isort --quiet "$fp"             >/dev/null 2>&1 || true
     ;;
   *.php)

@@ -2,6 +2,7 @@
 name: plan
 description: Front-load a task with a short, cited design spec and get approval BEFORE writing code. Produces a persistent plan artifact that survives compaction and defines the verification contract /verify later checks. Pass the task description as the argument; add --codex to have Codex adversarially review the spec before you build.
 argument-hint: "[--codex] [what you want built / changed]"
+effort: xhigh
 ---
 
 # Plan Before Building
@@ -34,13 +35,16 @@ than no spec. Grep first, then write.
 ## Phase 2: Write the spec artifact
 
 Write a spec file so the plan survives context compaction and gives `/verify` a definition of done.
+Fill in `SLUG` yourself, a few words from the task. Never paste the task text into the shell: it is
+user text, and backticks or `$(…)` in it would run as a command.
 
 ```bash
 # Prefer the project's .claude/plans/; fall back to ~/.claude/plans/ outside a repo.
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$HOME/.claude")
 PLAN_DIR="$ROOT/.claude/plans"; [ -d "$ROOT/.claude" ] || PLAN_DIR="$HOME/.claude/plans"
 mkdir -p "$PLAN_DIR"
-SLUG=$(echo "$ARGUMENTS" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-50 | sed 's/-$//')
+SLUG='<short-task-slug>'   # a-z, 0-9 and -, at most 50 characters
+SLUG=$(printf '%s' "$SLUG" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-50 | sed 's/^-//; s/-$//')
 PLAN_FILE="$PLAN_DIR/$(date +%Y-%m-%d)-${SLUG:-task}.md"
 echo "$PLAN_FILE"
 ```

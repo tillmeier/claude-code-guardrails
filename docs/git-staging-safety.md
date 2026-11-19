@@ -69,6 +69,26 @@ files. The discriminator is whether the list was seen.
   inspects Bash.
 - No blocking secret scanner since gitleaks was removed 2026-08-19 (privacy of repos + cost). A grep
   over the staged diff replaced it: a net, not a gate.
+- A wrapper hides the command from both guards: `bash -c 'git add -A'`, `eval`, a script file. They
+  inspect text at command position; following a wrapper means writing a shell parser.
+
+## Closed after the 2026-11-17 audit (v0.6.1)
+
+Probed against the shipped hooks; each new test failed on the old code first.
+- `git add -u` / `--update` passed: the guard only knew `-A`, `--all`, `.`, `:/`. Without a pathspec
+  `-u` stages every tracked change, the same sweep.
+- `git add -A -- .` passed: any `--` counted as a narrowing pathspec, even when the pathspec after it
+  is the whole tree. Now a sweep flag needs a named path, and a whole-tree pathspec needs an
+  `:(exclude)`.
+- The release review found the first per-token version counting shell tokens as pathspecs:
+  `git add -A 2>&1`, `> log.txt` and `# comment` passed, though the old guard blocked them. Redirects
+  (with their target) and comments are dropped before the check. A dry run (`-n`) stages nothing and
+  passes.
+- sql-guard: a WHERE-less `DELETE FROM t` passed as soon as anything followed on the line (`2>&1`,
+  `| cat`, `; SELECT 1`), because the old pattern swallowed the closing quote into the table name and
+  needed the line to end there. `TRUNCATE t` without `TABLE` passed too; MySQL and Postgres accept it.
+  The bare form counts only at a statement start, so a commit message ending in "fix truncate
+  behavior" passes; a shell-escaped identifier (`\"User\"`) counts as a table name.
 
 ## More traps in shared checkouts (2026-10)
 

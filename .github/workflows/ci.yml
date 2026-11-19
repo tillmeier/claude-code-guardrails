@@ -16,3 +16,19 @@ jobs:
         run: |
           bats --version
           bats tests/
+
+  # macOS /bin/bash 3.2 is the primary target. Under bash 3.2 a failing `[[ … ]]` mid-test does not
+  # fail the test, and an empty array under `set -u` aborts; only a run on 3.2 itself shows both.
+  test-macos-bash32:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats
+        run: HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 brew install bats-core
+      - name: Run tests under /bin/bash 3.2
+        run: |
+          mkdir -p "$RUNNER_TEMP/bash32" && ln -sf /bin/bash "$RUNNER_TEMP/bash32/bash"
+          export PATH="$RUNNER_TEMP/bash32:$PATH"
+          v=$(bash -c 'echo "$BASH_VERSION"'); echo "bash $v"
+          case "$v" in 3.2*) ;; *) echo "expected bash 3.2 first on PATH"; exit 1 ;; esac
+          bats tests/

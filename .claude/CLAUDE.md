@@ -7,11 +7,11 @@ root-level `CLAUDE.md` is not loaded for plugin users and trips `claude plugin v
 ## Where changes come from
 
 - The maintainer's private `~/.claude` config is the canonical source. This repo is a curated,
-  scrubbed downstream of it: `hooks/git-staging-guard.sh`, `precompact-handoff.sh`,
+  scrubbed downstream of it: `hooks/git-staging-guard.sh`, `sql-guard.sh`, `precompact-handoff.sh`,
   `session-start.sh` (private name: `session-start-hook.sh`), `format-file.sh`,
   `scripts/sync-commands.sh`, `commands/` (except `setup-check.md`), `skills/browser-mcp/`,
   `output-styles/terse.md` and `docs/` have a private twin. The skill is a rewrite: port lessons,
-  never the sites or setup. Public-only: `sql-guard.sh`, `hooks.json`, the manifests, `tests/`, CI,
+  never the sites or setup. Public-only: `hooks.json`, the manifests, `tests/`, CI,
   README, the reviewer adapter (`scripts/review-backend.sh`, its `.conf.example`, the findings
   schema) and `/setup-check` (`commands/setup-check.md`, `scripts/setup-check.sh`,
   `docs/setup-check.md`).

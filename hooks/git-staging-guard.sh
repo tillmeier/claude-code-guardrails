@@ -6,14 +6,17 @@
 # Denies the "sweep everything" spellings that let a concurrent session's work ride into a
 # Claude-issued commit (real incident: commit 9cc724e, 2026-08-19 — see docs/git-staging-safety.md).
 #
-#   DENIED : git add -A | git add --all | git add . | git add :/        (no explicit `--` pathspec)
+#   DENIED : git add -A | --all | -u | --update        (no pathspec: the whole tree)
+#            git add . | :/ | -- .                     (a whole-tree pathspec, with or without `--`)
 #            git commit -a | -am | -a -m                                 (stages while committing)
 #            ...including `git -C <dir> ...` forms and inside && / ; / | chains
 #   ALLOWED: git add <path>...            (explicit — what a disciplined commit step does)
-#            git add -A -- . ':(exclude,literal)<p>'   (tolerated: an explicit pathspec section)
+#            git add -u -- <path>...      (a sweep flag narrowed to named paths)
+#            git add -A -- . ':(exclude,literal)<p>'   (tolerated: the exclude is deliberate narrowing)
 #            git commit -m ...            (index already curated)
 #
-# This is a HABIT guard, not a sandbox: an unusual spelling or a wrapper can evade it. The rest of
+# This is a HABIT guard, not a sandbox: an unusual spelling or a wrapper can evade it
+# (`bash -c 'git add -A'`, `eval`, a script file; accepted, see docs/git-staging-safety.md). The rest of
 # the safety is procedural — a hard gate on a clean index before you start, then staging BY NAME —
 # see docs/git-staging-safety.md.
 #
@@ -84,14 +87,44 @@ def deny(reason, seg):
 # through: the trailing paren means `-A` is not followed by whitespace-or-end.
 END = r"(\s|$|[)}])"
 
+# Pathspecs that name the whole tree (from the repo root or the cwd), and the flags that stage
+# every tracked or untracked change when no pathspec narrows them. Short clusters count too
+# (`-Av`, `-uv`); `-p`, `-N`, `-f`, `-n`, `-v` alone do not.
+WHOLE_TREE = {".", "./", ":/", ":/.", ":/./", "*"}
+SWEEP_FLAG = re.compile(r"--all|--update|-[a-zA-Z]*[Au][a-zA-Z]*")
+EXCLUDE = re.compile(r"^:(\(exclude|\(top,exclude|!|\^)")
+
 for seg in segments:
     m = re.search(GIT_PREFIX + r"add(\s+.*)?$", seg)
     if m:
-        args = (m.group(1) or "").strip()
-        has_pathspec_section = re.search(r"(^|\s)--" + END, args) is not None
-        sweeps = re.search(r"(^|\s)(-A|--all|\.|:/)" + END, args) is not None
-        if sweeps and not has_pathspec_section:
-            deny("bare `git add` sweep (-A / --all / . / :/) with no explicit `--` pathspec", seg)
+        # Per token, quotes stripped; everything after a bare `--` is a pathspec. Shell-only tokens
+        # never reach git, so they must not count as a narrowing pathspec: a comment ends the list,
+        # and a redirect (`2>&1`, `>/dev/null`, `> log`) is dropped with its target.
+        raw = [t.rstrip(")}").strip("'\"") for t in re.split(r"\s+", (m.group(1) or "").strip()) if t]
+        tokens, skip = [], False
+        for t in raw:
+            if skip:
+                skip = False
+                continue
+            if t.startswith("#"):
+                break
+            if re.match(r"[0-9&]*[<>]", t):
+                skip = re.fullmatch(r"[0-9&]*(>>?|<)", t) is not None   # bare operator: target follows
+                continue
+            tokens.append(t)
+        if "--" in tokens:
+            opts, specs = tokens[:tokens.index("--")], tokens[tokens.index("--") + 1:]
+        else:
+            opts = [t for t in tokens if t.startswith("-")]
+            specs = [t for t in tokens if not t.startswith("-")]
+        sweep_flag = any(SWEEP_FLAG.fullmatch(t) for t in opts)
+        whole_tree = any(t in WHOLE_TREE for t in specs)
+        # `git add -A -- . ':(exclude)<p>'` stays allowed: the exclude is the deliberate narrowing.
+        narrowed = any(EXCLUDE.match(t) for t in specs)
+        # A dry run (`-n` / `--dry-run`) only lists what would be staged; `-N` is intent-to-add.
+        dry_run = any(t == "--dry-run" or re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", t) for t in opts)
+        if not narrowed and not dry_run and (whole_tree or (sweep_flag and not specs)):
+            deny("bare `git add` sweep (-A / --all / -u / --update / . / :/) with no narrowing pathspec", seg)
 
     m = re.search(GIT_PREFIX + r"commit(\s+.*)?$", seg)
     if m:

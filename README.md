@@ -77,15 +77,15 @@ script at `~/claude-code-guardrails/scripts/review-backend.sh`; for a checkout e
 ```json
 "hooks": {
   "SessionStart": [
-    {"hooks": [{"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/session-start.sh\""}]},
-    {"matcher": "compact", "hooks": [{"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/compact-handoff-inject.sh\""}]}
+    {"hooks": [{"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/session-start.sh\"", "timeout": 30}]},
+    {"matcher": "compact", "hooks": [{"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/compact-handoff-inject.sh\"", "timeout": 10}]}
   ],
   "PreToolUse": [{"matcher": "Bash", "hooks": [
     {"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/sql-guard.sh\"", "timeout": 10},
     {"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/git-staging-guard.sh\"", "timeout": 10}
   ]}],
-  "PostToolUse": [{"matcher": "Edit|Write|MultiEdit", "hooks": [{"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/format-file.sh\""}]}],
-  "PreCompact": [{"hooks": [{"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/precompact-handoff.sh\""}]}]
+  "PostToolUse": [{"matcher": "Edit|Write|MultiEdit", "hooks": [{"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/format-file.sh\"", "timeout": 60}]}],
+  "PreCompact": [{"hooks": [{"type": "command", "command": "bash \"$HOME/claude-code-guardrails/hooks/precompact-handoff.sh\"", "timeout": 30}]}]
 }
 ```
 
@@ -98,18 +98,18 @@ own (see [Reviewer backend](#reviewer-backend)). Tests need
 
 | File | Fires on | Does |
 |---|---|---|
-| `git-staging-guard.sh` | PreToolUse (Bash) | Denies `git add -A/--all/./:/` without a `--` pathspec and `git commit -a/-am/--all` — incl. `git -C` forms, command chains, `(…)`, `$(…)`, `{ …; }` |
-| `sql-guard.sh` | PreToolUse (Bash) | Denies `DROP TABLE/DATABASE`, `TRUNCATE TABLE`, `DELETE FROM t` with no WHERE, on any line of the command |
+| `git-staging-guard.sh` | PreToolUse (Bash) | Denies `git add -A/--all/-u/--update` with no pathspec, a whole-tree pathspec (`.`, `:/`, `-- .`) unless an `:(exclude)` narrows it, and `git commit -a/-am/--all` — incl. `git -C` forms, command chains, `(…)`, `$(…)`, `{ …; }` |
+| `sql-guard.sh` | PreToolUse (Bash) | Denies `DROP TABLE/DATABASE`, `TRUNCATE [TABLE] t`, `DELETE FROM t` with no WHERE (also when a redirect, pipe or second statement follows), on any line of the command |
 | `session-start.sh` | SessionStart | Writes HEAD, the list of already-dirty files and a blob of each one's content to per-session marker files, so `/verify` and `/critical-review` can scope to what this session changed. Write-once per session id: the re-fire after a compaction or resume keeps the original baseline |
 | `precompact-handoff.sh` | PreCompact | Appends branch, last commits, dirty files and the newest plan file to `~/.claude/handoffs/<session>.md` (override dir with `CLAUDE_HANDOFF_DIR`); GC after 14 days |
 | `compact-handoff-inject.sh` | SessionStart (`compact`) | Feeds the last section of that handoff file back into the context right after the compaction (`additionalContext`, capped at 2500 characters); silent for any other start |
-| `format-file.sh` | PostToolUse (Edit\|Write\|MultiEdit) | Runs the nearest Biome/Prettier config (walking up to the git root), else black/ruff/isort/php-cs-fixer if installed, else nothing. Disable with `CLAUDE_NO_FORMAT=1` |
+| `format-file.sh` | PostToolUse (Edit\|Write\|MultiEdit) | Runs the nearest Biome/Prettier config (walking up to the git root), else black (or `ruff format`), isort and php-cs-fixer if installed, else nothing. Formats only: no lint autofix that could drop an import between two edits. Disable with `CLAUDE_NO_FORMAT=1` |
 
 A blocked call exits 2; the tool call never runs and the model gets the stderr as the reason:
 
 ```text
 $ git add -A && git commit -F -
-BLOCKED by git-staging-guard: bare `git add` sweep (-A / --all / . / :/) with no explicit `--` pathspec
+BLOCKED by git-staging-guard: bare `git add` sweep (-A / --all / -u / --update / . / :/) with no narrowing pathspec
 
   offending segment: git add -A
 
@@ -221,10 +221,10 @@ exit 2 on findings; `--dry-run` shows what would transfer.
 ## Tests
 
 ```bash
-bats tests/        # 96 tests: guard patterns, SQL guard, formatter, session marker, handoff + read-back, reviewer backend, review helpers, setup check, wiring
+bats tests/        # 108 tests: guard patterns, SQL guard, formatter, session marker, handoff + read-back, reviewer backend, review helpers, setup check, wiring
 ```
 
-CI runs the same suite on ubuntu; macOS bash 3.2 is the primary target. The backend tests run
+CI runs the same suite on ubuntu and on macOS under `/bin/bash` 3.2, the primary target. The backend tests run
 against fake `codex`/`claude` executables that record their arguments — no model is ever called.
 
 ## Background
@@ -247,10 +247,6 @@ the reviewers found in this port are in [docs/review-backend.md](docs/review-bac
 ## Differences from my private copy
 
 - Absolute paths → `${CLAUDE_PLUGIN_ROOT}` / `$HOME`.
-- `git-staging-guard.sh` judges `git commit` flags per token, so `--all` and `-a --amend` are
-  caught too (the private copy missed both).
-- `sql-guard.sh` was a `jq | read` one-liner in settings.json that only saw the first line of a
-  command; it now checks every line and has the same prefilter as the git guard.
 - `session-start.sh` keys the marker file by session id (`${CLAUDE_SESSION_ID}`) instead of an
   undocumented env-file export, and adds the dirty-file / blob snapshot.
 - `critical-review.md` calls `scripts/review-backend.sh` instead of the Codex plugin's companion

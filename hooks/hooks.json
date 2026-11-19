@@ -6,7 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
+            "timeout": 30
           }
         ]
       },
@@ -15,7 +16,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/compact-handoff-inject.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/compact-handoff-inject.sh\"",
+            "timeout": 10
           }
         ]
       }
@@ -43,7 +45,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/format-file.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/format-file.sh\"",
+            "timeout": 60
           }
         ]
       }
@@ -53,7 +56,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/precompact-handoff.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/precompact-handoff.sh\"",
+            "timeout": 30
           }
         ]
       }
