@@ -221,7 +221,7 @@ exit 2 on findings; `--dry-run` shows what would transfer.
 ## Tests
 
 ```bash
-bats tests/        # 108 tests: guard patterns, SQL guard, formatter, session marker, handoff + read-back, reviewer backend, review helpers, setup check, wiring
+bats tests/        # 109 tests: guard patterns, SQL guard, formatter, session marker, handoff + read-back, reviewer backend, review helpers, setup check, wiring
 ```
 
 CI runs the same suite on ubuntu and on macOS under `/bin/bash` 3.2, the primary target. The backend tests run

@@ -186,6 +186,14 @@ new_repo() {  # $1 = name; leaves you inside a fresh repo with one commit
   run hook_bash "$SQL" 'mysql -e "DELETE FROM users WHERE id = 1" 2>&1'; allowed
 }
 
+@test "sql guard: a pipe glued to the table name is a regex alternation, not a statement end" {
+  run hook_bash "$SQL" 'grep -rnE "Usage\.delete|DELETE FROM usage_log|release_claim" app.py'; allowed
+  run hook_bash "$SQL" 'git grep -n -E "TRUNCATE|DELETE FROM member_tags|RENAME TABLE" -- src'; allowed
+  run hook_bash "$SQL" 'echo DELETE FROM users | mysql db'; blocked
+  run hook_bash "$SQL" 'mysql -e "DELETE FROM users" | cat'; blocked
+  run hook_bash "$SQL" 'psql -c "TRUNCATE users" | tail -1'; blocked
+}
+
 @test "sql guard: allows DELETE with a WHERE clause and plain reads" {
   run hook_bash "$SQL" 'mysql -e "DELETE FROM users WHERE id = 1"'; allowed
   run hook_bash "$SQL" 'mysql -e "SELECT * FROM users"'; allowed

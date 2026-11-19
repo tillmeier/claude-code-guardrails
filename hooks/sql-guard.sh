@@ -41,9 +41,11 @@ cmd = (data.get("tool_input") or {}).get("command") or ""
 # The old `\S+\s*;?\s*$` swallowed the closing quote into the name and needed the line to end
 # there, so `mysql -e "DELETE FROM t" 2>&1` got through.
 # Inside a double-quoted shell argument a quoted identifier arrives escaped: `\"User\"`.
+# A `|` ends the statement only after whitespace (`… FROM t | cat`). Glued to the name it is a
+# regex alternation, `grep -E "x|DELETE FROM t|y"`: 5 false blocks in 3 days of real calls.
 NAME = r'(?:\\"[^"\\\n]+\\"|`[^`\n]+`|"[^"\n]+"|[\w$]+)'
 TABLE = NAME + r"(?:\." + NAME + r")*"
-STMT_END = r"\s*(?=$|[;\"'`|&<>)]|\\\")"
+STMT_END = r"(?:\s*(?=$|[;\"'`&<>)]|\\\")|\s+(?=\|))"
 # The bare form (no TABLE keyword) only counts at a statement start — line start, or right after
 # `;`, a quote or `(` — so a commit message ending in "fix truncate behavior" is not SQL. Residual,
 # accepted: a two-word message such as -m "truncate output" still looks like a statement.

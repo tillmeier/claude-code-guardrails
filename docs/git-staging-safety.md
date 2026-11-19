@@ -89,6 +89,11 @@ Probed against the shipped hooks; each new test failed on the old code first.
   needed the line to end there. `TRUNCATE t` without `TABLE` passed too; MySQL and Postgres accept it.
   The bare form counts only at a statement start, so a commit message ending in "fix truncate
   behavior" passes; a shell-escaped identifier (`\"User\"`) counts as a table name.
+- v0.6.3: a replay of three days of real Bash calls through the v0.6.1 pattern showed one new class
+  of false blocks, a search for the statement: `grep -E "x|DELETE FROM t|y"`. A `|` now ends the
+  statement only after whitespace (`… FROM t | cat`); glued to the table name it is a regex
+  alternation. Residual, accepted: a pattern whose last alternative is the statement
+  (`"x|DELETE FROM t"`) ends at the closing quote and is still blocked.
 
 ## More traps in shared checkouts (2026-10)
 
