@@ -104,6 +104,12 @@ Probed against the shipped hooks; each new test failed on the old code first.
   quote-aware), and `mysql -e "DELETE FROM \`users\`"` (a backtick name escaped for the shell was
   not a table name). The replay and the review find different things: the replay only knows the
   spellings people used, the review only the ones it thinks of. Run both.
+- v0.6.6: the next review round found a third one in the v0.6.5 tokenizer: in
+  `(git add -A 2> "build.log")` the removed redirect left the closing `)` as a word of its own,
+  which became empty after trimming and still counted as a pathspec. Empty words are dropped now.
+  Three rounds, one spelling each, is the sign that single cases do not cover a tokenizer: the
+  maintainer now checks the guard against a generated matrix of every combination of wrapper,
+  sweep flag, pathspec, redirect and comment (5,418 cases; the v0.6.5 guard got 30 of them wrong).
 - How the replay works: every Bash command the sessions really ran (from the transcripts, filtered
   by each record's own timestamp) goes through the old and the candidate script, and the exit codes
   are compared in both directions. "Newly blocked" finds false positives, "released" finds

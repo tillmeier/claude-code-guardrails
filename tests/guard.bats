@@ -104,6 +104,13 @@ new_repo() {  # $1 = name; leaves you inside a fresh repo with one commit
   run hook_bash "$GUARD" 'git add "docs/my file.md" > "out put.log"'; allowed
 }
 
+@test "git guard: a wrapper's closing paren after a removed redirect is not a pathspec" {
+  run hook_bash "$GUARD" '(git add -A 2> "build.log")'; blocked
+  run hook_bash "$GUARD" '$(git add -u 2>"a b.log")'; blocked
+  run hook_bash "$GUARD" 'git add -A ""'; blocked
+  run hook_bash "$GUARD" '(git add -A "docs/my file.md" 2> "build.log")'; allowed
+}
+
 @test "git guard: a redirect or comment after a sweep is not a pathspec (review 2026-11-19)" {
   for cmd in 'git add -A 2>&1' 'git add -A >/dev/null' 'git add -A > log.txt' 'git add -u 2>/dev/null' 'git add --all # stage'; do
     run hook_bash "$GUARD" "$cmd"

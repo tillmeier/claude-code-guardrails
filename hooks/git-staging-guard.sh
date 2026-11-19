@@ -108,7 +108,9 @@ for seg in segments:
         for t in re.findall(WORD, args):
             if t.startswith("#"):
                 break
-            tokens.append(t.rstrip(")}").strip("'\""))
+            t = t.rstrip(")}").strip("'\"")
+            if t:                      # a lone `)` left behind by a removed redirect is not a path
+                tokens.append(t)
         if "--" in tokens:
             opts, specs = tokens[:tokens.index("--")], tokens[tokens.index("--") + 1:]
         else:
