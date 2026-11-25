@@ -11,6 +11,7 @@ setup() {
   export HOME="$BATS_TEST_TMPDIR/home"; mkdir -p "$HOME"        # no real ~/.claude/review-backend.conf
   export TMPDIR="$BATS_TEST_TMPDIR"
   unset REVIEWER CODEX_REVIEW_MODEL CODEX_REVIEW_EFFORT CLAUDE_REVIEW_MODEL CLAUDE_REVIEW_MAX_TURNS REVIEW_CUSTOM_CMD REVIEW_BACKEND_CONF
+  unset AGY_BIN GEMINI_REVIEW_MODEL GEMINI_REVIEW_TIMEOUT                   # never the maintainer's real agy
   export FAKE_LOG="$BATS_TEST_TMPDIR/fake"; mkdir -p "$FAKE_LOG"
   FAKEBIN="$BATS_TEST_TMPDIR/bin"; mkdir -p "$FAKEBIN"
   BARE="/usr/bin:/bin"                                          # git + python3, but no codex / claude
@@ -57,13 +58,16 @@ mode="${FAKE_AGY_MODE:-ok}"
 printf '{"event":"init","init":{"model":"%s"}}\n' "$model"
 case "$mode" in
   tool_ran) printf '%s\n' '{"event":"step_update","step_update":{"step_index":2,"step_type":"tool","state":"DONE","tool_name":"read_file","tool_info":{}}}' ;;
-  denied)   printf '%s\n' '{"event":"step_update","step_update":{"step_index":2,"step_type":"tool","state":"ERROR","tool_name":"read_file","tool_info":{"error":{"message":"Permission denied for read_file(/etc/hosts)"}}}}' ;;
+  denied)   printf '%s\n' '{"event":"step_update","step_update":{"step_index":2,"step_type":"tool","state":"ERROR","tool_name":"read_file","tool_info":{"error":{"message":"Permission denied for read_file(/etc/hosts). Matches user-configured deny rule."}}}}' ;;
+  os_denied) printf '%s\n' '{"event":"step_update","step_update":{"step_index":2,"step_type":"tool","state":"ERROR","tool_name":"read_file","tool_info":{"error":{"message":"open /etc/x: Permission denied (os error 13)"}}}}' ;;
   left_file) touch stray.txt ;;
 esac
 case "$mode" in
   prose)  printf '%s\n' '{"event":"result","result":{"status":"SUCCESS","response":"Looks fine to me."}}' ;;
   filter) printf '%s\n' '{"event":"result","result":{"status":"SUCCESS","response":"This request was blocked by Gemini'"'"'s filters."}}' ;;
   error)  printf '%s\n' '{"event":"result","result":{"status":"ERROR","error":"Individual quota reached"}}'; exit 3 ;;
+  empty_obj) printf '%s\n' '{"event":"result","result":{"status":"SUCCESS","response":"{}"}}' ;;
+  bad_finding) python3 -c 'import json; print(json.dumps({"event": "result", "result": {"status": "SUCCESS", "response": json.dumps({"verdict": "needs-attention", "summary": "s", "findings": [{"severity": "high", "title": "t"}]})}}))' ;;
   *)      python3 -c 'import json; print(json.dumps({"event": "result", "result": {"status": "SUCCESS", "response": "```json\n{\"verdict\":\"approve\",\"summary\":\"fake gemini\",\"findings\":[]}\n```"}}))' ;;
 esac
 SH
@@ -340,7 +344,7 @@ new_repo() {
 
 @test "gemini: a tool that ran, another model, prose, a filter refusal, an error or a stray file is exit 4" {
   new_repo g3; fake_agy
-  for mode in tool_ran wrong_model prose filter error left_file; do
+  for mode in tool_ran wrong_model prose filter error left_file os_denied empty_obj bad_finding; do
     run env REVIEWER=gemini FAKE_AGY_MODE=$mode bash "$RB" --base "$BASE"
     [ "$status" -eq 4 ] || { echo "mode $mode gave $status: $output"; false; }
     [[ "$output" != *'"verdict"'* ]]
@@ -366,4 +370,27 @@ new_repo() {
   grep -q '    40 +changed40' "$FAKE_LOG/agy.stdin"
   grep -q '    15  line15' "$FAKE_LOG/agy.stdin"                  # 25 lines before the change
   ! grep -q 'line14$' "$FAKE_LOG/agy.stdin"
+}
+
+@test "gemini: an added line starting with ++ keeps its number; the working tree is numbered against the disk" {
+  new_repo g7; fake_agy
+  printf 'int a;\nint b;\n' > c.c; git add c.c; git commit -qm c; B=$(git rev-parse HEAD)
+  printf 'int a;\n++i;\nint b;\nint z;\n' > c.c; git add c.c; git commit -qm pp
+  run env REVIEWER=gemini bash "$RB" --base "$B"
+  [ "$status" -eq 0 ]
+  grep -q '     2 +++i;' "$FAKE_LOG/agy.stdin"
+  grep -q '     4 +int z;' "$FAKE_LOG/agy.stdin"
+  printf 'top\nint a;\n++i;\nint b;\nint z;\nstaged\n' > c.c; git add c.c
+  printf 'NEW FIRST\ntop\nint a;\n++i;\nint b;\nint z;\nstaged\n' > c.c          # unstaged insert above the staged change
+  run env REVIEWER=gemini bash "$RB" --scope working-tree
+  [ "$status" -eq 0 ]
+  grep -q '     7 +staged' "$FAKE_LOG/agy.stdin"                    # line 7 on disk, not 6 as in the index
+}
+
+@test "gemini: AGY_BIN must be an executable file and is used by its absolute path" {
+  new_repo g8; fake_agy
+  run env REVIEWER=gemini AGY_BIN="$FAKEBIN" bash "$RB" --detect
+  [ "$status" -eq 3 ]                                            # a directory is not an agy
+  run env REVIEWER=gemini AGY_BIN="../bin/agy" PATH="$BARE" bash "$RB" --base "$BASE"
+  [ "$status" -eq 0 ]                                            # relative path still works after the cd
 }

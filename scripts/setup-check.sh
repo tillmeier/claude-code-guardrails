@@ -176,11 +176,12 @@ if [ -f "$SD/review-backend.sh" ]; then
       codex)  ok "/critical-review reviewer: codex ${RB_MODEL:-} (codex login checked)" ;;
       claude) ok "/critical-review reviewer: claude CLI on PATH${RB_MODEL:+, $RB_MODEL} (login not checked)" ;;
       custom) ok "/critical-review reviewer: custom command configured (not run)" ;;
+      gemini) ok "/critical-review reviewer: gemini via agy${RB_MODEL:+, $RB_MODEL} (sign-in not checked; code goes to Google)" ;;
       *)      miss "/critical-review reviewer: unexpected answer from review-backend.sh --detect: $(first_line "$TMP/detect")" ;;
     esac
   elif [ $rc -eq 3 ]; then
     miss "/critical-review reviewer: none usable — $(sed -n 's/^review-backend: //p' "$TMP/detect.err" | head -1 | cut -c1-200)" \
-      "npm i -g @openai/codex && codex login   (or install the Claude Code CLI)"
+      "$(if grep -q 'REVIEWER=gemini' "$TMP/detect.err" 2>/dev/null; then echo 'install the Antigravity CLI (agy) and sign in, or set AGY_BIN'; else echo 'npm i -g @openai/codex && codex login   (or install the Claude Code CLI)'; fi)"
   elif [ $rc -eq 124 ]; then
     miss "/critical-review reviewer: review-backend.sh --detect timed out after ${LIMIT}s"
   else

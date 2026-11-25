@@ -70,6 +70,11 @@ comparison, 24-25.11.2026). Facts measured on agy 1.5.16:
 - **A content-filter refusal is `status SUCCESS`** with prose; it fails as "not a JSON review".
 - **Terminal wrappers:** cmux puts its own `agy` wrapper first on PATH (it installs the terminal's
   hooks first). The script skips such paths and honours `AGY_BIN`.
+- **v0.7.1 (Codex review of v0.7.0):** the answer must match `review-findings.schema.json` (required
+  fields, types, enums), or exit 4; only agy's own policy denial ("… Matches user-configured deny rule")
+  counts as a blocked tool, not any "Permission denied"; an added line starting with `++` keeps its number;
+  the working tree goes to Gemini as ONE diff against HEAD, so numbers are lines on disk; `AGY_BIN` must
+  be an executable file and is run by its absolute path; setup-check recognises `gemini`.
 - **First real run (this port's v0.6.7 commit):** three real gaps in the new staging-guard tokenizer,
   fixed in the same release (comment with an apostrophe, `$(…)` as a redirect target, a quoted `#`).
 

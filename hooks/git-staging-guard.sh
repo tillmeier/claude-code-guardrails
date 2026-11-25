@@ -54,8 +54,42 @@ cmd = (data.get("tool_input") or {}).get("command") or ""
 if "git" not in cmd:
     sys.exit(0)
 
-# Split chained commands; each segment is judged on its own.
-segments = re.split(r"&&|\|\||;|\||\n", cmd)
+# Split chained commands; each segment is judged on its own. Only UNQUOTED `&&` `||` `;` `|` split: a
+# plain regex split also cut `git add -A > "audit;log"` inside the quotes, and the half with the open
+# quote was then skipped as payload (Codex review 25.11.2026). A line break always splits and resets the
+# quote state, as before - otherwise an apostrophe in a heredoc body (`don't`) would swallow every
+# command after it. Backslash-newline is a continuation, not a break.
+def split_segments(text):
+    text = text.replace("\\\n", " ")
+    segs, cur, q, i = [], [], None, 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\n":
+            segs.append("".join(cur)); cur, q = [], None
+        elif q == "'":
+            cur.append(ch); q = None if ch == "'" else q
+        elif q == '"':
+            cur.append(ch)
+            if ch == "\\" and i + 1 < len(text) and text[i + 1] != "\n":
+                cur.append(text[i + 1]); i += 1
+            elif ch == '"':
+                q = None
+        elif ch == "\\" and i + 1 < len(text):
+            cur.append(ch); cur.append(text[i + 1]); i += 1
+        elif ch in "'\"":
+            cur.append(ch); q = ch
+        elif text.startswith("&&", i) or text.startswith("||", i):
+            segs.append("".join(cur)); cur = []; i += 1
+        elif ch in ";|":
+            segs.append("".join(cur)); cur = []
+        else:
+            cur.append(ch)
+        i += 1
+    segs.append("".join(cur))
+    return segs
+
+
+segments = split_segments(cmd)
 
 # Match only at COMMAND POSITION — the start of a segment, after optional wrappers like
 # `(`, `{`, `$(`. Searching anywhere in the segment produced false positives on any command whose
@@ -204,7 +238,22 @@ for seg in segments:
         # Judged per token so `--amend`, `--author=` and `--allow-empty` never count as `-a`, and
         # so `-a --amend` cannot hide behind them. (Public port: the private copy exempted any
         # `--a…` option from the whole check and did not know `--all` at all.)
-        tokens = [t.rstrip(")}") for t in re.split(r"\s+", args) if t]
+        # Shell words, not whitespace pieces: a quoted message such as "… for every -abc suffix" is ONE
+        # word and no flag (a whitespace split read `-abc` as `-a`). The value after -m/-F/-C/-c and the
+        # other value-taking options is skipped too, so a message "-a" is not a flag either.
+        words = shell_words(args)
+        if words is None:
+            words = []
+        tokens, skip = [], False
+        for t in words:
+            if skip:
+                skip = False
+                continue
+            if t in ("-m", "-F", "-C", "-c", "-t", "--message", "--file", "--author", "--date", "--template",
+                     "--reuse-message", "--reedit-message", "--fixup", "--squash", "--cleanup", "--trailer"):
+                skip = True
+                continue
+            tokens.append(t)
         if any(re.fullmatch(r"-[a-zA-Z]*a[a-zA-Z]*", t) or t == "--all" for t in tokens):
             deny("`git commit -a` / `--all` stages tracked changes implicitly", seg)
 

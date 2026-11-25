@@ -134,11 +134,15 @@ claude_ok() { command -v claude >/dev/null 2>&1; }
 # The agy to run: $AGY_BIN, else the first `agy` on PATH that is not a terminal's wrapper script (cmux
 # ships one in its app bundle and per-session shims; they install the terminal's own hooks first).
 find_agy() {
-  if [ -n "${AGY_BIN:-}" ]; then [ -x "$AGY_BIN" ] && { printf '%s\n' "$AGY_BIN"; return 0; }; return 1; fi
+  # an executable FILE, returned as an absolute path: the run happens after `cd` into an empty directory
+  if [ -n "${AGY_BIN:-}" ]; then
+    [ -f "$AGY_BIN" ] && [ -x "$AGY_BIN" ] && { (cd "$(dirname "$AGY_BIN")" && printf '%s/%s\n' "$(pwd -P)" "$(basename "$AGY_BIN")"); return 0; }
+    return 1
+  fi
   local d IFS=:
   for d in $PATH; do
     case "$d" in *cmux.app*|*/.cmuxterm/*) continue ;; esac
-    [ -x "$d/agy" ] && [ -f "$d/agy" ] && { printf '%s\n' "$d/agy"; return 0; }
+    [ -x "$d/agy" ] && [ -f "$d/agy" ] && { (cd "$d" && printf '%s/agy\n' "$(pwd -P)"); return 0; }
   done
   return 1
 }
@@ -230,9 +234,9 @@ for line in sys.stdin.read().splitlines():
     m = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
     if m:
         new = int(m.group(1)); print(line)
-    elif new is not None and line[:1] in (" ", "+") and not line.startswith("+++"):
+    elif new is not None and line[:1] in (" ", "+"):        # inside a hunk "+++i;" is an added "++i;"
         print("%6d %s" % (new, line)); new += 1
-    elif new is not None and line[:1] == "-" and not line.startswith("---"):
+    elif new is not None and line[:1] == "-":
         print("%6s %s" % ("", line))
     else:
         if line.startswith("diff --git"):
@@ -259,8 +263,14 @@ untracked_body() {  # $1 = path relative to REPO_ROOT
 review_input() {
   if [ "$SCOPE" = "working-tree" ]; then
     section "Git status" "$(git_r status --short --untracked-files=all)"
-    section "Staged diff" "$(git_r diff --cached --no-ext-diff ${DIFF_CTX[@]+"${DIFF_CTX[@]}"} | numbered)"
-    section "Unstaged diff" "$(git_r diff --no-ext-diff ${DIFF_CTX[@]+"${DIFF_CTX[@]}"} | numbered)"
+    if [ "$BACKEND" = gemini ]; then
+      # one diff against HEAD, so every number is a line of the file on disk (a staged diff numbers the
+      # index, which is off by any unstaged change above it)
+      section "Diff against HEAD (staged + unstaged)" "$(git_r diff HEAD --no-ext-diff ${DIFF_CTX[@]+"${DIFF_CTX[@]}"} | numbered)"
+    else
+      section "Staged diff" "$(git_r diff --cached --no-ext-diff)"
+      section "Unstaged diff" "$(git_r diff --no-ext-diff)"
+    fi
     printf '## Untracked files\n\n'
     local any=0 p
     while IFS= read -r p; do [ -n "$p" ] || continue; any=1; untracked_body "$p"; done <<UNTRACKED
@@ -411,7 +421,7 @@ PY
         < "$WORK/gemini.in" ) || STATUS=$?
     LEFT=$(ls -A "$GWS")
     [ -z "$LEFT" ] || fail_backend "files appeared in the empty workspace: $LEFT"
-    python3 - "$LOG_FILE" "$OUT_FILE" "$MODEL" "$STATUS" <<'PY' || fail_backend "see above"
+    python3 - "$LOG_FILE" "$OUT_FILE" "$MODEL" "$STATUS" "$SCHEMA_FILE" <<'PY' || fail_backend "see above"
 import json, re, sys
 log, out, model, status = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 final, seen, tools, anon = None, None, {}, 0
@@ -442,7 +452,8 @@ def fail(msg):
     sys.stderr.write("review-backend: gemini: " + msg + "\n"); sys.exit(1)
 # Only an explicit "Permission denied" counts as blocked; DONE, any other error or an open step may have acted.
 ran = [t["name"] for t in tools.values()
-       if not (t["last"] == "ERROR" and "DONE" not in t["states"] and re.search("permission denied", t["error"], re.I))]
+       if not (t["last"] == "ERROR" and "DONE" not in t["states"]
+               and re.search(r"permission denied for \w+\(.*user-configured deny rule", t["error"], re.I | re.S))]
 if ran:
     fail("a tool may have run despite the deny rules: " + ", ".join(map(str, ran)))
 if not final:
@@ -473,6 +484,29 @@ except ValueError:
          + ": " + text[:200])
 if not isinstance(review, dict):
     fail("the answer is not a JSON object")
+# the review contract (scripts/review-findings.schema.json): exit 0 only with a schema-shaped review
+schema = json.load(open(sys.argv[5]))
+def shape(obj, sch, where):
+    for k in sch.get("required", []):
+        if k not in obj:
+            fail("the review lacks %s%s" % (where, k))
+    for k, sub in sch.get("properties", {}).items():
+        if k not in obj:
+            continue
+        v, t = obj[k], sub.get("type")
+        ok = {"string": isinstance(v, str), "array": isinstance(v, list), "object": isinstance(v, dict),
+              "number": isinstance(v, (int, float)) and not isinstance(v, bool),
+              "integer": isinstance(v, int) and not isinstance(v, bool), "boolean": isinstance(v, bool)}.get(t, True)
+        if not ok:
+            fail("%s%s is not a %s" % (where, k, t))
+        if "enum" in sub and v not in sub["enum"]:
+            fail("%s%s is %r, not one of %s" % (where, k, v, sub["enum"]))
+        if t == "array" and isinstance(sub.get("items"), dict) and sub["items"].get("type") == "object":
+            for i, item in enumerate(v):
+                if not isinstance(item, dict):
+                    fail("%s%s[%d] is not an object" % (where, k, i))
+                shape(item, sub["items"], "%s%s[%d]." % (where, k, i))
+shape(review, schema, "")
 open(out, "w").write(json.dumps(review, indent=2) + "\n")
 PY
     [ -s "$OUT_FILE" ] || fail_backend "empty result"

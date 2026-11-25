@@ -9,7 +9,8 @@ setup() {
   export CLAUDE_CONFIG_DIR="$BATS_TEST_TMPDIR/cfg"; mkdir -p "$CLAUDE_CONFIG_DIR"
   export TMPDIR="$BATS_TEST_TMPDIR"
   unset REVIEWER CODEX_REVIEW_MODEL CODEX_REVIEW_EFFORT CLAUDE_REVIEW_MODEL CLAUDE_REVIEW_MAX_TURNS \
-        REVIEW_CUSTOM_CMD REVIEW_BACKEND_CONF GUARDRAILS_CHROME_APP SETUP_CHECK_STUB_DIR CLAUDE_PLUGIN_ROOT
+        REVIEW_CUSTOM_CMD REVIEW_BACKEND_CONF GUARDRAILS_CHROME_APP SETUP_CHECK_STUB_DIR CLAUDE_PLUGIN_ROOT \
+        AGY_BIN GEMINI_REVIEW_MODEL GEMINI_REVIEW_TIMEOUT
   export SETUP_CHECK_TIMEOUT=5
   TB="$BATS_TEST_TMPDIR/toolbin"; FB="$BATS_TEST_TMPDIR/fakebin"; mkdir -p "$TB" "$FB"
   local t p
@@ -98,6 +99,15 @@ all_present() {
   has "✓ /critical-review reviewer: claude CLI on PATH, claude-"; has "(login not checked)"
   has "✗ Codex plugin for /plan --codex: not installed"
   has "→ /plugin marketplace add openai/codex-plugin-cc"
+}
+
+@test "setup-check: REVIEWER=gemini with agy → a working reviewer; without agy → the agy install hint" {
+  all_present; fake agy 'exit 0'
+  run env REVIEWER=gemini bash "$SC"
+  has "✓ /critical-review reviewer: gemini via agy, gemini-4-neon-high (sign-in not checked; code goes to Google)"
+  rm "$FB/agy"
+  run env REVIEWER=gemini bash "$SC"
+  has "install the Antigravity CLI (agy)"
 }
 
 @test "setup-check: git or python3 missing → exit 1; without python3 the settings checks say so" {

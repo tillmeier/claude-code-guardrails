@@ -161,6 +161,16 @@ new_repo() {  # $1 = name; leaves you inside a fresh repo with one commit
   run hook_bash "$GUARD" 'git add src/a.py # cleanup'; allowed
 }
 
+@test "git guard: separators inside quotes do not split a command (v0.7.1)" {
+  run hook_bash "$GUARD" 'git add -A > "audit;log"'; blocked
+  run hook_bash "$GUARD" 'git add -A 2>"a|b.log"'; blocked
+  run hook_bash "$GUARD" 'echo "a;git add -A"'; allowed
+  run hook_bash "$GUARD" "$(printf 'cat <<EOF\ndon'"'"'t\nEOF\ngit add -A')"; blocked   # a heredoc apostrophe hides nothing
+  run hook_bash "$GUARD" 'git commit -q -m "feat: for every -abc suffix (x; y)"'; allowed   # a message is no flag
+  run hook_bash "$GUARD" 'git commit -m "-a"'; allowed
+  run hook_bash "$GUARD" 'git commit -m x -a'; blocked
+}
+
 @test "git guard: allows commit without implicit staging" {
   for cmd in 'git commit -m "msg"' 'git commit -F -' 'git commit --amend --no-edit' 'git commit --author="a <a@b>" -m x' 'git commit --allow-empty -m x' 'git commit -S -m x'; do
     run hook_bash "$GUARD" "$cmd"
