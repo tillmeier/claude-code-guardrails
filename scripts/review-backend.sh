@@ -8,10 +8,14 @@
 #   review-backend.sh --base <ref> [--focus "text"]  # review <ref>..HEAD
 #   review-backend.sh --print-prompt ...             # show the assembled prompt, run nothing
 #
-# Backends (REVIEWER=codex|claude|custom, else auto-detected — see review-backend.conf.example):
+# Backends (REVIEWER=codex|claude|gemini|custom, else auto-detected — see review-backend.conf.example):
 #   codex   native mode: `codex exec review` (the CLI's built-in reviewer) — default when no focus;
 #           prompt mode: `codex exec --sandbox read-only` with the prompt below + a JSON schema.
 #   claude  prompt mode only: `claude -p --restricted` with Read/Grep/Glob and every write tool disallowed.
+#   gemini  prompt mode only, never auto-detected: the Antigravity CLI (`agy`) in an EMPTY directory with
+#           per-run deny rules for file reads, writes, commands, web and MCP; the diff goes inline with 25
+#           lines of context, each line numbered as in the current file. A run in which a tool did anything,
+#           another model answered, or the answer is not JSON is exit 4. Docs: docs/review-backend.md.
 #   custom  prompt mode only: $REVIEW_CUSTOM_CMD, prompt on stdin, review on stdout.
 #
 # What every backend gets is the same: the git diff, assembled here, plus the optional focus text.
@@ -37,10 +41,12 @@ DEFAULT_CODEX_MODEL="gpt-6.2-sol"   # needs codex CLI 0.170 (tested 0.170.0; 0.1
 DEFAULT_CODEX_EFFORT="high"   # `codex exec review` has no --effort flag; without a pin the model's own default applies
 DEFAULT_CLAUDE_MODEL="claude-opus-5"
 DEFAULT_CLAUDE_MAX_TURNS=30
+DEFAULT_GEMINI_MODEL="gemini-4-neon-high"   # an `agy models` slug; the effort is part of the slug
+DEFAULT_GEMINI_TIMEOUT=900                  # seconds; a large diff took 4.5 min in testing
 
 usage() {
   cat <<USAGE
-Usage: $(basename "$0") [--detect] [--backend codex|claude|custom] [--mode auto|native|prompt]
+Usage: $(basename "$0") [--detect] [--backend codex|claude|gemini|custom] [--mode auto|native|prompt]
                          [--scope working-tree | --base <ref>] [--focus <text>] [--conf <file>]
                          [--print-prompt] [--verbose]
 
@@ -90,8 +96,10 @@ case "$SCOPE" in ""|working-tree|base) ;; *) die_usage "--scope must be working-
 # ── config: env beats conf, conf beats defaults ───────────────────────────────────────────────────
 ENV_REVIEWER="${REVIEWER:-}"; ENV_CODEX_MODEL="${CODEX_REVIEW_MODEL:-}"; ENV_CLAUDE_MODEL="${CLAUDE_REVIEW_MODEL:-}"
 ENV_CLAUDE_TURNS="${CLAUDE_REVIEW_MAX_TURNS:-}"; ENV_CUSTOM="${REVIEW_CUSTOM_CMD:-}"
+ENV_GEMINI_MODEL="${GEMINI_REVIEW_MODEL:-}"; ENV_GEMINI_TIMEOUT="${GEMINI_REVIEW_TIMEOUT:-}"
 ENV_CODEX_EFFORT_SET=0; ENV_CODEX_EFFORT=""; [ -n "${CODEX_REVIEW_EFFORT+x}" ] && { ENV_CODEX_EFFORT_SET=1; ENV_CODEX_EFFORT="$CODEX_REVIEW_EFFORT"; }
 REVIEWER=""; CODEX_REVIEW_MODEL=""; CLAUDE_REVIEW_MODEL=""; CLAUDE_REVIEW_MAX_TURNS=""; REVIEW_CUSTOM_CMD=""
+GEMINI_REVIEW_MODEL=""; GEMINI_REVIEW_TIMEOUT=""
 CODEX_REVIEW_EFFORT="$DEFAULT_CODEX_EFFORT"   # empty in the conf or the env = leave it to ~/.codex/config.toml
 
 if [ -z "$CONF" ]; then
@@ -109,16 +117,31 @@ fi
 [ -n "$ENV_CLAUDE_MODEL" ] && CLAUDE_REVIEW_MODEL="$ENV_CLAUDE_MODEL"
 [ -n "$ENV_CLAUDE_TURNS" ] && CLAUDE_REVIEW_MAX_TURNS="$ENV_CLAUDE_TURNS"
 [ -n "$ENV_CUSTOM" ]       && REVIEW_CUSTOM_CMD="$ENV_CUSTOM"
+[ -n "$ENV_GEMINI_MODEL" ] && GEMINI_REVIEW_MODEL="$ENV_GEMINI_MODEL"
+[ -n "$ENV_GEMINI_TIMEOUT" ] && GEMINI_REVIEW_TIMEOUT="$ENV_GEMINI_TIMEOUT"
 [ "$ENV_CODEX_EFFORT_SET" -eq 1 ] && CODEX_REVIEW_EFFORT="$ENV_CODEX_EFFORT"
 [ -n "$FLAG_BACKEND" ]     && REVIEWER="$FLAG_BACKEND"
 : "${CODEX_REVIEW_MODEL:=$DEFAULT_CODEX_MODEL}"
 : "${CLAUDE_REVIEW_MODEL:=$DEFAULT_CLAUDE_MODEL}"
 : "${CLAUDE_REVIEW_MAX_TURNS:=$DEFAULT_CLAUDE_MAX_TURNS}"
+: "${GEMINI_REVIEW_MODEL:=$DEFAULT_GEMINI_MODEL}"
+: "${GEMINI_REVIEW_TIMEOUT:=$DEFAULT_GEMINI_TIMEOUT}"
 
 # ── backend detection ─────────────────────────────────────────────────────────────────────────────
 # Sets BACKEND and MODEL, or exits 3 with every check that was made. Never substitutes.
 codex_ok()  { command -v codex  >/dev/null 2>&1 && codex login status </dev/null >/dev/null 2>&1; }
 claude_ok() { command -v claude >/dev/null 2>&1; }
+# The agy to run: $AGY_BIN, else the first `agy` on PATH that is not a terminal's wrapper script (cmux
+# ships one in its app bundle and per-session shims; they install the terminal's own hooks first).
+find_agy() {
+  if [ -n "${AGY_BIN:-}" ]; then [ -x "$AGY_BIN" ] && { printf '%s\n' "$AGY_BIN"; return 0; }; return 1; fi
+  local d IFS=:
+  for d in $PATH; do
+    case "$d" in *cmux.app*|*/.cmuxterm/*) continue ;; esac
+    [ -x "$d/agy" ] && [ -f "$d/agy" ] && { printf '%s\n' "$d/agy"; return 0; }
+  done
+  return 1
+}
 
 no_backend() {
   echo "review-backend: no usable reviewer — $*" >&2
@@ -135,6 +158,10 @@ resolve_backend() {
     claude)
       claude_ok || no_backend "REVIEWER=claude but claude is not on PATH"
       BACKEND=claude; MODEL="$CLAUDE_REVIEW_MODEL" ;;
+    gemini)
+      # Explicit only: auto-detection never sends code to a reviewer the user did not name.
+      AGY=$(find_agy) || no_backend "REVIEWER=gemini but agy (Antigravity CLI) is not on PATH (or \$AGY_BIN)"
+      BACKEND=gemini; MODEL="$GEMINI_REVIEW_MODEL" ;;
     custom)
       [ -n "$REVIEW_CUSTOM_CMD" ] || no_backend "REVIEWER=custom but REVIEW_CUSTOM_CMD is empty"
       BACKEND=custom; MODEL="custom" ;;
@@ -150,7 +177,7 @@ resolve_backend() {
       if claude_ok; then BACKEND=claude; MODEL="$CLAUDE_REVIEW_MODEL"; return; fi
       no_backend "checked: REVIEW_CUSTOM_CMD unset; ${checked}; claude not on PATH" ;;
     *)
-      echo "review-backend: unknown REVIEWER '$REVIEWER' (codex | claude | custom)" >&2; exit 1 ;;
+      echo "review-backend: unknown REVIEWER '$REVIEWER' (codex | claude | gemini | custom)" >&2; exit 1 ;;
   esac
 }
 
@@ -191,6 +218,29 @@ fi
 # ── review input (prompt mode) ────────────────────────────────────────────────────────────────────
 section() { printf '## %s\n\n' "$1"; if [ -n "$2" ]; then printf '%s\n\n' "$2"; else printf '(none)\n\n'; fi; }
 
+# gemini has no file access: it gets more context and a line number on every line it may cite.
+DIFF_CTX=()
+[ "$BACKEND" = gemini ] && DIFF_CTX=(-U25)
+numbered() {  # stdin = a unified diff; prefixes context and added lines with their line in the new file
+  if [ "$BACKEND" != gemini ]; then cat; return; fi
+  python3 -c '
+import re, sys
+new = None
+for line in sys.stdin.read().splitlines():
+    m = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
+    if m:
+        new = int(m.group(1)); print(line)
+    elif new is not None and line[:1] in (" ", "+") and not line.startswith("+++"):
+        print("%6d %s" % (new, line)); new += 1
+    elif new is not None and line[:1] == "-" and not line.startswith("---"):
+        print("%6s %s" % ("", line))
+    else:
+        if line.startswith("diff --git"):
+            new = None
+        print(line)
+'
+}
+
 untracked_body() {  # $1 = path relative to REPO_ROOT
   local f="$REPO_ROOT/$1" size
   printf '### %s\n' "$1"
@@ -202,14 +252,15 @@ untracked_body() {  # $1 = path relative to REPO_ROOT
   if [ "$size" -gt "$MAX_UNTRACKED_BYTES" ]; then printf '(skipped: %s bytes exceeds %s byte limit)\n\n' "$size" "$MAX_UNTRACKED_BYTES"; return; fi
   if [ "$size" -eq 0 ]; then printf '(empty file)\n\n'; return; fi
   if ! grep -qI '' "$f" 2>/dev/null; then printf '(skipped: binary file)\n\n'; return; fi
-  printf '```\n'; cat "$f"; printf '\n```\n\n'
+  if [ "$BACKEND" = gemini ]; then printf '```\n'; awk '{ printf "%6d  %s\n", NR, $0 }' "$f"; printf '```\n\n'
+  else printf '```\n'; cat "$f"; printf '\n```\n\n'; fi
 }
 
 review_input() {
   if [ "$SCOPE" = "working-tree" ]; then
     section "Git status" "$(git_r status --short --untracked-files=all)"
-    section "Staged diff" "$(git_r diff --cached --no-ext-diff)"
-    section "Unstaged diff" "$(git_r diff --no-ext-diff)"
+    section "Staged diff" "$(git_r diff --cached --no-ext-diff ${DIFF_CTX[@]+"${DIFF_CTX[@]}"} | numbered)"
+    section "Unstaged diff" "$(git_r diff --no-ext-diff ${DIFF_CTX[@]+"${DIFF_CTX[@]}"} | numbered)"
     printf '## Untracked files\n\n'
     local any=0 p
     while IFS= read -r p; do [ -n "$p" ] || continue; any=1; untracked_body "$p"; done <<UNTRACKED
@@ -219,16 +270,19 @@ UNTRACKED
   else
     section "Commits (${BASE_SHA}..HEAD)" "$(git_r log --oneline --no-decorate "${BASE_SHA}..HEAD")"
     section "Diff stat" "$(git_r diff --stat "${BASE_SHA}..HEAD")"
-    section "Diff" "$(git_r diff --no-ext-diff "${BASE_SHA}..HEAD")"
+    section "Diff" "$(git_r diff --no-ext-diff ${DIFF_CTX[@]+"${DIFF_CTX[@]}"} "${BASE_SHA}..HEAD" | numbered)"
   fi
 }
 
 build_prompt() {
+  local access="you may read other files in the repository to confirm or dismiss a suspicion, but do
+not modify anything."
+  [ "$BACKEND" = gemini ] && access="it is everything you get: you have no tools, do not try to call any.
+The number in front of a diff line is its line in the CURRENT file; cite those numbers."
   cat <<PROMPT
 You are a skeptical senior engineer reviewing a change you did not write, by an author you cannot
 ask. Find the strongest reasons this change should not ship yet. The change is in the repository
-context below; you may read other files in the repository to confirm or dismiss a suspicion, but do
-not modify anything.
+context below; ${access}
 
 Scope: ${SCOPE_LABEL}
 Focus: ${FOCUS:-none — review the whole change}
@@ -340,6 +394,86 @@ out = json.dumps(so, indent=2) if isinstance(so, dict) else str(d.get("result") 
 if not out.strip():
     sys.stderr.write("claude returned an envelope without a result\n"); sys.exit(3)
 open(sys.argv[2], "w").write(out + "\n")
+PY
+    [ -s "$OUT_FILE" ] || fail_backend "empty result"
+    cat "$OUT_FILE" ;;
+
+  gemini)
+    # agy runs in an EMPTY directory with per-run deny rules (passed with --settings, never saved): without
+    # them a headless agy wrote a file, ran a command and read a file outside its workspace (agy 1.5.16).
+    GWS="$WORK/gemini-workspace"; mkdir -p "$GWS"
+    SETTINGS='{"permissions":{"deny":["read_file(*)","write_file(*)","command(*)","read_url(*)","execute_url(*)","mcp(*)"]}}'
+    python3 -c 'import json, sys; print(json.dumps({"event": "user", "message": {"content": sys.stdin.read()}}))' \
+      < "$PROMPT_FILE" > "$WORK/gemini.in" || fail_backend "could not build the input"
+    # `-p=` with an attached empty value: a bare -p takes the next argument as the prompt.
+    ( cd "$GWS" && run_backend "$AGY" --model "$MODEL" --settings "$SETTINGS" --disable-slash-commands \
+        --input-format stream-json --output-format stream-json --print-timeout "${GEMINI_REVIEW_TIMEOUT}s" -p= \
+        < "$WORK/gemini.in" ) || STATUS=$?
+    LEFT=$(ls -A "$GWS")
+    [ -z "$LEFT" ] || fail_backend "files appeared in the empty workspace: $LEFT"
+    python3 - "$LOG_FILE" "$OUT_FILE" "$MODEL" "$STATUS" <<'PY' || fail_backend "see above"
+import json, re, sys
+log, out, model, status = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+final, seen, tools, anon = None, None, {}, 0
+for ln in open(log, errors="replace").read().splitlines():
+    ln = ln.strip()
+    if not ln.startswith("{"):
+        continue
+    try:
+        ev = json.loads(ln)
+    except ValueError:
+        continue
+    kind = ev.get("event") if isinstance(ev, dict) else None
+    body = ev.get(kind) if isinstance(ev.get(kind) if kind else None, dict) else {}
+    if kind == "init":
+        seen = body.get("model") or seen
+    elif kind == "step_update" and body.get("step_type") == "tool":
+        key = body.get("step_index")
+        if key is None:
+            anon += 1; key = "anon-%d" % anon
+        t = tools.setdefault(key, {"name": body.get("tool_name"), "states": set(), "last": None, "error": ""})
+        t["states"].add(body.get("state")); t["last"] = body.get("state")
+        err = (body.get("tool_info") or {}).get("error") or {}
+        if err:
+            t["error"] = str(err.get("message", ""))[:200]
+    elif kind == "result":
+        final = body
+def fail(msg):
+    sys.stderr.write("review-backend: gemini: " + msg + "\n"); sys.exit(1)
+# Only an explicit "Permission denied" counts as blocked; DONE, any other error or an open step may have acted.
+ran = [t["name"] for t in tools.values()
+       if not (t["last"] == "ERROR" and "DONE" not in t["states"] and re.search("permission denied", t["error"], re.I))]
+if ran:
+    fail("a tool may have run despite the deny rules: " + ", ".join(map(str, ran)))
+if not final:
+    fail("no result event (exit %d)" % status)
+st = str(final.get("status", "")).upper()
+if status != 0 or st not in ("SUCCESS", ""):
+    fail("status %s, exit %d: %s" % (st or "-", status, str(final.get("error") or "")[:300]))
+if seen != model:
+    fail("asked for %s, the run reports %s" % (model, seen or "no model"))
+text = (final.get("response") or "").strip()
+def extract(t):
+    try:
+        return json.loads(t)
+    except ValueError:
+        pass
+    m = re.match(r"^[^{`]*```(?:json)?\s*(\{.*\})\s*```\s*$", t, re.S)
+    if m:
+        return json.loads(m.group(1))
+    i, j = t.find("{"), t.rfind("}")
+    if i >= 0 and j > i:
+        return json.loads(t[i:j + 1])
+    raise ValueError("no JSON object")
+try:
+    review = extract(text)
+except ValueError:
+    # a content-filter refusal comes back as status SUCCESS with prose
+    fail("the answer is not a JSON review" + (" (content filter)" if re.search(r"blocked by Gemini.s filters", text) else "")
+         + ": " + text[:200])
+if not isinstance(review, dict):
+    fail("the answer is not a JSON object")
+open(out, "w").write(json.dumps(review, indent=2) + "\n")
 PY
     [ -s "$OUT_FILE" ] || fail_backend "empty result"
     cat "$OUT_FILE" ;;

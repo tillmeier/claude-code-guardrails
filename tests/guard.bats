@@ -151,6 +151,16 @@ new_repo() {  # $1 = name; leaves you inside a fresh repo with one commit
   run hook_bash "$GUARD" 'git add -A && echo "it is done"'; blocked
 }
 
+@test "git guard: comments and substitutions (second review of the shlex version)" {
+  run hook_bash "$GUARD" "git add -A # don't stage it"; blocked        # an apostrophe in a comment is no quote
+  run hook_bash "$GUARD" 'git add -A > $(mktemp)'; blocked              # a substitution is one word
+  run hook_bash "$GUARD" 'git add -A 2>$(mktemp -d)/x'; blocked
+  run hook_bash "$GUARD" 'git add -A > `mktemp`'; blocked
+  run hook_bash "$GUARD" 'git add "#notes.md"'; allowed                 # a quoted # is a path
+  run hook_bash "$GUARD" 'git add $(git ls-files -m)'; allowed          # a substitution names paths
+  run hook_bash "$GUARD" 'git add src/a.py # cleanup'; allowed
+}
+
 @test "git guard: allows commit without implicit staging" {
   for cmd in 'git commit -m "msg"' 'git commit -F -' 'git commit --amend --no-edit' 'git commit --author="a <a@b>" -m x' 'git commit --allow-empty -m x' 'git commit -S -m x'; do
     run hook_bash "$GUARD" "$cmd"

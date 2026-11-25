@@ -120,6 +120,11 @@ Probed against the shipped hooks; each new test failed on the old code first.
   quotes is skipped: the segment split cut through a quoted string, so it is payload, not a command
   (`grep -E '… && git add -A )'`). The matrix with these six spellings added: 10,038 cases, the new guard
   0 wrong, the v0.6.6 guard 2,240 wrong. Replaying 30 days of real calls (8,510): identical verdicts.
+- v0.7.0: the new Gemini backend's first real run reviewed v0.6.7 and found three more: `git add -A #
+  don't` passed (the apostrophe in the comment made shlex fail, and the segment was skipped), `git add
+  -A > $(mktemp)` passed (the split substitution left `mktemp` as a "path"), and a quoted `"#x"` was read
+  as a comment. Comments are now cut quote-aware before shlex, and `$(…)`, `$((…))` and backticks become
+  one placeholder word first. Matrix: 17,184 cases, 0 wrong (v0.6.7: 1,819); replay unchanged.
 - How the replay works: every Bash command the sessions really ran (from the transcripts, filtered
   by each record's own timestamp) goes through the old and the candidate script, and the exit codes
   are compared in both directions. "Newly blocked" finds false positives, "released" finds
@@ -161,6 +166,13 @@ Each one cost real work in a repo several sessions used at once.
   back for review; a plain push ships it. Check `git log origin/<branch>..HEAD` first. To push only
   yours: a detached worktree at `origin/<branch>`, `cherry-pick` your commits, `cmp` the touched
   files, push from there.
+- **Diverged (ahead N, behind M, other sessions' local commits): do not commit in the shared tree at
+  all.** Move your change into a push worktree at `origin/<branch>` -
+  `git diff HEAD -- <your files> | git -C <pushwt> apply --index`, copy new files - then test, commit
+  and push from there. Afterwards, once `cmp` shows the shared tree's files byte-identical to the
+  pushed commit, `git checkout -- <your modified files>` and remove your new files in the shared tree:
+  a leftover UNTRACKED copy of a file the next pull brings aborts the owners' `pull --rebase`
+  ("untracked working tree files would be overwritten").
 - **The checkout may be on another session's branch.** The session-start snapshot said `master`; a
   parallel session had switched the shared checkout since, and `git checkout -b` branched off their
   branch and moved the checkout out from under them. Run `git status -sb` before branching, and

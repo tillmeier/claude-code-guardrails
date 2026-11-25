@@ -11,7 +11,8 @@ You are running a **critical review** of the changes made in THIS session, by an
 reviewer, and then judging its findings against the code and the session's intent.
 
 The reviewer is whatever `scripts/review-backend.sh` finds: the Codex CLI, the Claude Code CLI, or a
-command you configured (`REVIEWER=codex|claude|custom`, models pinned in `review-backend.conf`). It
+command you configured (`REVIEWER=codex|claude|gemini|custom`, models pinned in `review-backend.conf`;
+`gemini` only when named). It
 runs read-only and **never sees the conversation brief** — only the diff and, optionally, your focus
 text. Framing a change as intended or bug-free collapses a reviewer's true-positive rate
 (arXiv 2603.18740), so intent is applied only afterwards, by you, behind a mandatory source re-read.

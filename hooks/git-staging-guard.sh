@@ -103,6 +103,7 @@ def shell_words(args):
     closing `)` of `(git add …)` / `$(git add …)` is dropped. Unbalanced quotes return None: the segment
     split cut through a quoted string (`grep -E '… && git add -A )'`), so this is payload, not a command
     the shell would run - the only new block in a 30-day replay of 8,510 real calls."""
+    args = mask_substitutions(strip_comment(args))
     args = re.sub(r"(?:^|(?<=\s))\d+(?=[<>])", " ", args)
     try:
         lx = shlex.shlex(args, posix=True, punctuation_chars=True)
@@ -114,14 +115,61 @@ def shell_words(args):
     words, i = [], 0
     while i < len(raw):
         t = raw[i]
-        if t.startswith("#"):
-            break
         if re.fullmatch(r"[<>&|;()]+", t):
             i += 2 if ("<" in t or ">" in t) else 1      # a redirect consumes its target; `)` `&` stand alone
             continue
         words.append(t.rstrip(")}"))
         i += 1
     return [w for w in words if w]
+
+
+def mask_substitutions(args):
+    """Replace `$(…)`, `$((…))` and backticks (outside single quotes) by one placeholder word, so the
+    substitution stays part of the word it is glued to: `2>$(mktemp -d)/x` is one redirect target, not
+    a target plus a "pathspec" `/x` (punctuation_chars would split the parentheses apart)."""
+    out, i, q = [], 0, None
+    while i < len(args):
+        ch = args[i]
+        if q == "'":
+            q = None if ch == "'" else q
+        elif ch == "'" and q is None:
+            q = "'"
+        elif ch == '"':
+            q = None if q == '"' else '"'
+        elif ch == "`" or (ch == "$" and args[i + 1:i + 2] == "("):
+            j, depth = i + 1, 0
+            if ch == "`":
+                j = args.find("`", i + 1)
+                j = len(args) if j < 0 else j + 1
+            else:
+                while j < len(args):
+                    depth += {"(": 1, ")": -1}.get(args[j], 0)
+                    j += 1
+                    if depth == 0:
+                        break
+            out.append("SUBST")
+            i = j
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def strip_comment(args):
+    """Cut a shell comment: `#` at the start of a word, outside quotes. Done before shlex because an
+    apostrophe inside a comment (`# don't`) is an unbalanced quote to shlex (Gemini review of v0.6.7),
+    and after shlex a quoted `"#x"` would look like a comment."""
+    q, prev = None, " "
+    for i, ch in enumerate(args):
+        if q:
+            if ch == q:
+                q = None
+        elif ch in "'\"":
+            q = ch
+        elif ch == "#" and prev.isspace():
+            return args[:i]
+        prev = ch
+    return args
 
 
 for seg in segments:

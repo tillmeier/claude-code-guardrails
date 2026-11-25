@@ -172,6 +172,7 @@ backend, model and mode actually ran.
 |---|---|---|
 | `codex` | `codex exec review` (Codex's built-in reviewer), or `codex exec --sandbox read-only` with the adversarial prompt when there is focus text / `--adversarial` | needs `codex login`; stdin is closed so nothing can hang |
 | `claude` | `claude -p --restricted` with only `Read`/`Grep`/`Glob`, every write and shell tool disallowed, your settings/hooks/plugins not loaded, permission prompts denied, no session persisted, structured JSON output | prompt mode only |
+| `gemini` | the Antigravity CLI (`agy`) in an empty directory with per-run deny rules for file reads, writes, commands, web and MCP; the diff goes inline with 25 lines of context and new-file line numbers | prompt mode only, **never auto-detected** (your code goes to Google only when you name it); a run in which a tool did anything, another model answered or the answer is not JSON is exit 4 |
 | `custom` | `REVIEW_CUSTOM_CMD` via `bash -c`, prompt on stdin, review on stdout | any other vendor, or a wrapper of your own |
 
 Untracked symlinks are listed but never followed, so a link to a file outside the repository cannot

@@ -45,6 +45,31 @@ SH
   chmod +x "$FAKEBIN/claude"; export PATH="$FAKEBIN:$BARE"
 }
 
+# Fake agy (Antigravity CLI): records argv, cwd + its listing, and stdin; prints stream-json events.
+fake_agy() {
+  cat > "$FAKEBIN/agy" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FAKE_LOG/agy.argv"; pwd > "$FAKE_LOG/agy.cwd"; ls -A > "$FAKE_LOG/agy.listing"
+cat > "$FAKE_LOG/agy.stdin"
+model=""; prev=""; for a in "$@"; do [ "$prev" = "--model" ] && model="$a"; prev="$a"; done
+mode="${FAKE_AGY_MODE:-ok}"
+[ "$mode" = wrong_model ] && model="gemini-3.8-flash"
+printf '{"event":"init","init":{"model":"%s"}}\n' "$model"
+case "$mode" in
+  tool_ran) printf '%s\n' '{"event":"step_update","step_update":{"step_index":2,"step_type":"tool","state":"DONE","tool_name":"read_file","tool_info":{}}}' ;;
+  denied)   printf '%s\n' '{"event":"step_update","step_update":{"step_index":2,"step_type":"tool","state":"ERROR","tool_name":"read_file","tool_info":{"error":{"message":"Permission denied for read_file(/etc/hosts)"}}}}' ;;
+  left_file) touch stray.txt ;;
+esac
+case "$mode" in
+  prose)  printf '%s\n' '{"event":"result","result":{"status":"SUCCESS","response":"Looks fine to me."}}' ;;
+  filter) printf '%s\n' '{"event":"result","result":{"status":"SUCCESS","response":"This request was blocked by Gemini'"'"'s filters."}}' ;;
+  error)  printf '%s\n' '{"event":"result","result":{"status":"ERROR","error":"Individual quota reached"}}'; exit 3 ;;
+  *)      python3 -c 'import json; print(json.dumps({"event": "result", "result": {"status": "SUCCESS", "response": "```json\n{\"verdict\":\"approve\",\"summary\":\"fake gemini\",\"findings\":[]}\n```"}}))' ;;
+esac
+SH
+  chmod +x "$FAKEBIN/agy"; export PATH="$FAKEBIN:$BARE"
+}
+
 # A repo with two commits and a dirty tree. Sets BASE (= first commit).
 #   c1: old.txt (old-marker)   c2: new.txt (new-marker)   dirty: a.txt unstaged, untracked.txt
 new_repo() {
@@ -271,4 +296,74 @@ new_repo() {
   [ "$status" -eq 4 ]
   run env FAKE_CLAUDE_OUTPUT='{"type":"result","is_error":false,"result":"plain text review"}' bash "$RB" --scope working-tree
   [ "$status" -eq 0 ]; [[ "$output" == *"plain text review"* ]]
+}
+
+# ───────────────────────────── gemini ─────────────────────────────
+
+@test "gemini: explicit only — never auto-detected; named but missing is exit 3" {
+  new_repo g1; fake_agy
+  run bash "$RB" --detect
+  [ "$status" -eq 3 ]                                           # agy alone is not picked automatically
+  run env REVIEWER=gemini bash "$RB" --detect;  [ "$status" -eq 0 ]; [ "$output" = "gemini gemini-4-neon-high" ]
+  run env REVIEWER=gemini GEMINI_REVIEW_MODEL=gemini-4-neon-medium bash "$RB" --detect; [ "$output" = "gemini gemini-4-neon-medium" ]
+  export PATH="$BARE"
+  run env REVIEWER=gemini bash "$RB" --detect
+  [ "$status" -eq 3 ]; [[ "$output" == *"REVIEWER=gemini but agy (Antigravity CLI) is not on PATH"* ]]
+}
+
+@test "gemini: a terminal's agy wrapper on PATH is skipped; AGY_BIN wins" {
+  new_repo g6; fake_agy
+  W="$BATS_TEST_TMPDIR/Apps/cmux.app/bin"; mkdir -p "$W"
+  printf '#!/bin/sh\necho WRAPPER > "$FAKE_LOG/wrapper"; exit 9\n' > "$W/agy"; chmod +x "$W/agy"
+  run env REVIEWER=gemini PATH="$W:$FAKEBIN:$BARE" bash "$RB" --base "$BASE"
+  [ "$status" -eq 0 ]; [ ! -e "$FAKE_LOG/wrapper" ]
+  run env REVIEWER=gemini AGY_BIN="$BATS_TEST_TMPDIR/none" bash "$RB" --detect
+  [ "$status" -eq 3 ]
+}
+
+@test "gemini: empty workspace, deny rules, prompt on stdin with numbered diff and no file-reading invitation" {
+  new_repo g2; fake_agy
+  run env REVIEWER=gemini bash "$RB" --base "$BASE"
+  [ "$status" -eq 0 ]; [[ "$output" == *'"summary": "fake gemini"'* ]]
+  [ ! -s "$FAKE_LOG/agy.listing" ]                               # the repository is not its workspace
+  [[ "$(cat "$FAKE_LOG/agy.cwd")" != *"/g2"* ]]
+  for rule in 'read_file(*)' 'write_file(*)' 'command(*)' 'read_url(*)' 'execute_url(*)' 'mcp(*)'; do
+    grep -qF "$rule" "$FAKE_LOG/agy.argv"
+  done
+  grep -qx -- '-p=' "$FAKE_LOG/agy.argv"
+  grep -q 'new-marker' "$FAKE_LOG/agy.stdin"                     # the change is inline
+  grep -q '     1 +new-marker' "$FAKE_LOG/agy.stdin"             # with its line number in the new file
+  grep -q 'you have no tools' "$FAKE_LOG/agy.stdin"
+  ! grep -q 'you may read other files' "$FAKE_LOG/agy.stdin"
+  ! grep -q 'unstaged-marker' "$FAKE_LOG/agy.stdin"              # --base: uncommitted work stays out
+}
+
+@test "gemini: a tool that ran, another model, prose, a filter refusal, an error or a stray file is exit 4" {
+  new_repo g3; fake_agy
+  for mode in tool_ran wrong_model prose filter error left_file; do
+    run env REVIEWER=gemini FAKE_AGY_MODE=$mode bash "$RB" --base "$BASE"
+    [ "$status" -eq 4 ] || { echo "mode $mode gave $status: $output"; false; }
+    [[ "$output" != *'"verdict"'* ]]
+  done
+  run env REVIEWER=gemini FAKE_AGY_MODE=denied bash "$RB" --base "$BASE"   # a blocked tool is fine
+  [ "$status" -eq 0 ]
+}
+
+@test "gemini: working tree — untracked files are numbered, --mode native falls back to prompt" {
+  new_repo g4; fake_agy
+  run env REVIEWER=gemini bash "$RB" --scope working-tree --mode native
+  [ "$status" -eq 0 ]; [[ "$output" == *"no native reviewer for backend 'gemini'"* ]]
+  grep -q '     1  untracked-marker' "$FAKE_LOG/agy.stdin"
+}
+
+@test "gemini: 25 lines of context around a change, numbered as in the current file" {
+  new_repo g5; fake_agy
+  for i in $(seq 1 60); do echo "line$i"; done > long.txt; git add long.txt; git commit -qm long
+  B=$(git rev-parse HEAD)
+  sed -i.bak 's/^line40$/changed40/' long.txt && rm long.txt.bak; git add long.txt; git commit -qm change
+  run env REVIEWER=gemini bash "$RB" --base "$B"
+  [ "$status" -eq 0 ]
+  grep -q '    40 +changed40' "$FAKE_LOG/agy.stdin"
+  grep -q '    15  line15' "$FAKE_LOG/agy.stdin"                  # 25 lines before the change
+  ! grep -q 'line14$' "$FAKE_LOG/agy.stdin"
 }

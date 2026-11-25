@@ -45,6 +45,34 @@ The README says what the pieces do; this is the why and the numbers.
   with the same session id; overwriting the markers would move the baseline to "now" and hide the
   session's earlier edits from `/verify` and `/critical-review`.
 
+## v0.7.0: Gemini as a fourth backend
+
+Built on the maintainer's machine first and ported after real use (four reviews, a judge and a model
+comparison, 24-25.11.2026). Facts measured on agy 1.5.16:
+
+- **Why agy and not the Gemini CLI:** the Gemini CLI stopped serving personal Google AI Pro/Ultra
+  logins in June 2026 and does not know Gemini 4 Neon. The Antigravity CLI (`agy`) does. Google's
+  Antigravity FAQ calls wrapping agy into other tools "not supported" on consumer plans; that is the
+  user's call, which is one reason the backend is never auto-detected.
+- **Headless agy is not read-only by default.** Without rules, one prompt made it write a file, run a
+  command and read a file outside its workspace. `--settings '<json>'` applies per run and is never
+  saved; deny rules for `read_file(*)`, `write_file(*)`, `command(*)`, `read_url(*)`, `execute_url(*)`
+  and `mcp(*)` blocked all three: the tool step ends `ERROR` with "Permission denied" and the run
+  still exits 0. So the script checks every tool step itself and accepts only that exact outcome.
+- **`read_file` cannot be confined to one file:** an allow rule for one path loses to `deny
+  read_file(*)`, and path globs like `read_file(/Users/*)` match nothing. Hence no file access at all
+  and the diff inline, with 25 lines of context and the new-file line number on every line it may cite.
+- **`-p` takes the next argument as its prompt.** With stream-json input write `-p=` (attached empty
+  value); the prompt then comes from stdin.
+- **stream-json events are nested:** `{"event":"init","init":{"model":…}}`, `{"event":"step_update",
+  "step_update":{…}}`, `{"event":"result","result":{"status","response","error"}}`. The model is
+  checked against the one requested; an unknown model exits 1.
+- **A content-filter refusal is `status SUCCESS`** with prose; it fails as "not a JSON review".
+- **Terminal wrappers:** cmux puts its own `agy` wrapper first on PATH (it installs the terminal's
+  hooks first). The script skips such paths and honours `AGY_BIN`.
+- **First real run (this port's v0.6.7 commit):** three real gaps in the new staging-guard tokenizer,
+  fixed in the same release (comment with an apostrophe, `$(…)` as a redirect target, a quoted `#`).
+
 ## v0.3.0: scope helper and event log
 
 - **Scope classification is a shipped script** (`scripts/scope-delta.sh`), not an inline block the
