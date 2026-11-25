@@ -130,6 +130,27 @@ new_repo() {  # $1 = name; leaves you inside a fresh repo with one commit
   done
 }
 
+@test "git guard: a quoted part glued to a word stays one word (shlex, v0.6.7)" {
+  # redirect targets that used to fall apart into a target plus a fake narrowing pathspec
+  run hook_bash "$GUARD" 'git add -A > "$TMPDIR"/git.log'; blocked
+  run hook_bash "$GUARD" 'git add -A >"build.log"2>&1'; blocked
+  # whole-tree pathspecs that used to be read as `.` / `:/`
+  run hook_bash "$GUARD" 'git add "."/src/a.sh'; allowed
+  run hook_bash "$GUARD" 'git add ":/"$file'; allowed
+}
+
+@test "git guard: <> and <<< take their target with them" {
+  run hook_bash "$GUARD" 'git add -A <> x.txt'; blocked
+  run hook_bash "$GUARD" 'git add -A <<< "some input"'; blocked
+  run hook_bash "$GUARD" 'git add src/a.py <<< "some input"'; allowed
+}
+
+@test "git guard: a segment with unbalanced quotes is payload, not a command" {
+  # the && inside the quoted grep pattern splits the line; the rest is not something the shell runs
+  run hook_bash "$GUARD" "cut -c1-190 out.txt | grep -v -E '^ (git add -A |cd [^ ]+ && git add -A )' | head -80"; allowed
+  run hook_bash "$GUARD" 'git add -A && echo "it is done"'; blocked
+}
+
 @test "git guard: allows commit without implicit staging" {
   for cmd in 'git commit -m "msg"' 'git commit -F -' 'git commit --amend --no-edit' 'git commit --author="a <a@b>" -m x' 'git commit --allow-empty -m x' 'git commit -S -m x'; do
     run hook_bash "$GUARD" "$cmd"

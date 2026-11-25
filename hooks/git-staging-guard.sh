@@ -41,7 +41,7 @@ case "$INPUT" in
 esac
 
 python3 - "$INPUT" <<'PY'
-import json, re, sys
+import json, re, shlex, sys
 
 try:
     data = json.loads(sys.argv[1])
@@ -94,6 +94,36 @@ WHOLE_TREE = {".", "./", ":/", ":/.", ":/./", "*"}
 SWEEP_FLAG = re.compile(r"--all|--update|-[a-zA-Z]*[Au][a-zA-Z]*")
 EXCLUDE = re.compile(r"^:(\(exclude|\(top,exclude|!|\^)")
 
+def shell_words(args):
+    """The words git would see, as the shell builds them (shlex, 25.11.2026). The hand-built splitter before
+    it broke `"$TMPDIR"/git.log` into two words (so a redirect target counted as a narrowing pathspec)
+    and read `"."/src/a.sh` as `.`, the whole tree - four gaps in the same spot, found by Gemini.
+    Redirect operators (`>`, `>>`, `<`, `<>`, `<<<`, `>&`, `&>` ...) take their target with them, a file
+    descriptor written directly before one is not a word, a word starting with `#` ends the list, and the
+    closing `)` of `(git add …)` / `$(git add …)` is dropped. Unbalanced quotes return None: the segment
+    split cut through a quoted string (`grep -E '… && git add -A )'`), so this is payload, not a command
+    the shell would run - the only new block in a 30-day replay of 8,510 real calls."""
+    args = re.sub(r"(?:^|(?<=\s))\d+(?=[<>])", " ", args)
+    try:
+        lx = shlex.shlex(args, posix=True, punctuation_chars=True)
+        lx.whitespace_split = True
+        lx.commenters = ""
+        raw = list(lx)
+    except ValueError:
+        return None
+    words, i = [], 0
+    while i < len(raw):
+        t = raw[i]
+        if t.startswith("#"):
+            break
+        if re.fullmatch(r"[<>&|;()]+", t):
+            i += 2 if ("<" in t or ">" in t) else 1      # a redirect consumes its target; `)` `&` stand alone
+            continue
+        words.append(t.rstrip(")}"))
+        i += 1
+    return [w for w in words if w]
+
+
 for seg in segments:
     m = re.search(GIT_PREFIX + r"add(\s+.*)?$", seg)
     if m:
@@ -102,15 +132,9 @@ for seg in segments:
         # with its target (`2>&1`, `>/dev/null`, `> log`, and a quoted target with spaces,
         # `2> "build output.log"`), and a comment ends the list. Words are split quote-aware, so a
         # quoted path with spaces stays one word.
-        WORD = r'''"[^"]*"|'[^']*'|\S+'''
-        args = re.sub(r"(?:^|(?<=\s))[0-9&]*(?:>>?|<)&?[ \t]*(?:" + WORD + r")?", " ", m.group(1) or "")
-        tokens = []
-        for t in re.findall(WORD, args):
-            if t.startswith("#"):
-                break
-            t = t.rstrip(")}").strip("'\"")
-            if t:                      # a lone `)` left behind by a removed redirect is not a path
-                tokens.append(t)
+        tokens = shell_words(m.group(1) or "")
+        if tokens is None:
+            continue
         if "--" in tokens:
             opts, specs = tokens[:tokens.index("--")], tokens[tokens.index("--") + 1:]
         else:

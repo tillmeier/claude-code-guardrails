@@ -110,6 +110,16 @@ Probed against the shipped hooks; each new test failed on the old code first.
   Three rounds, one spelling each, is the sign that single cases do not cover a tokenizer: the
   maintainer now checks the guard against a generated matrix of every combination of wrapper,
   sweep flag, pathspec, redirect and comment (5,418 cases; the v0.6.5 guard got 30 of them wrong).
+- v0.6.7: a second model (Gemini) reviewing v0.6.4 to v0.6.6 found four more gaps in the same spot, all
+  from treating a partly quoted word as two words: `git add -A > "$TMPDIR"/git.log` and
+  `git add -A >"build.log"2>&1` passed (the unquoted rest of the target counted as a pathspec),
+  `<>` and `<<<` passed, and `git add "."/src/a.sh` and `git add ":/"$file` were blocked as the whole
+  tree. Four rounds, one spelling each: the hand-built splitter is replaced by Python's `shlex`
+  (`punctuation_chars`), which builds the words the way the shell does. Redirect operators take their
+  target with them, a file descriptor written before one is not a word, and a segment with unbalanced
+  quotes is skipped: the segment split cut through a quoted string, so it is payload, not a command
+  (`grep -E '… && git add -A )'`). The matrix with these six spellings added: 10,038 cases, the new guard
+  0 wrong, the v0.6.6 guard 2,240 wrong. Replaying 30 days of real calls (8,510): identical verdicts.
 - How the replay works: every Bash command the sessions really ran (from the transcripts, filtered
   by each record's own timestamp) goes through the old and the candidate script, and the exit codes
   are compared in both directions. "Newly blocked" finds false positives, "released" finds
