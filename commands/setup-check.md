@@ -1,6 +1,6 @@
 ---
 name: setup-check
-description: Check what of guardrails is set up on this machine — git/python3, the /critical-review reviewer, the Codex plugin, Node, Chrome, browser MCP servers, output style, hooks registered twice — and print the exact fix for each gap.
+description: Check what of guardrails is set up on this machine — git/python3, the reviewer for /critical-review and /plan --codex, Node, Chrome, browser MCP servers, output style, hooks registered twice — and print the exact fix for each gap.
 argument-hint: ""
 allowed-tools: Bash(bash:*)
 ---

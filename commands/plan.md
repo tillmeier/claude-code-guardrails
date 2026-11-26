@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Front-load a task with a short, cited design spec and get approval BEFORE writing code. Produces a persistent plan artifact that survives compaction and defines the verification contract /verify later checks. Pass the task description as the argument; add --codex to have Codex adversarially review the spec before you build.
+description: Front-load a task with a short, cited design spec and get approval BEFORE writing code. Produces a persistent plan artifact that survives compaction and defines the verification contract /verify later checks. Pass the task description as the argument; add --codex to have an independent reviewer (Codex by default, the same one /critical-review uses) adversarially review the spec before you build.
 argument-hint: "[--codex] [what you want built / changed]"
 effort: xhigh
 ---
@@ -15,8 +15,8 @@ novel. If the task is trivial
 The task is `$ARGUMENTS`. If empty, ask the user what they want to build in one line, then proceed.
 
 **Flag:** if `$ARGUMENTS` contains `--codex`, strip it out (the rest is the task) and set
-`CODEX_REVIEW=true` — this runs Phase 2.5 below, which needs the optional Codex plugin and is a
-stated no-op without it. Everything else is unchanged.
+`CODEX_REVIEW=true` — this runs Phase 2.5 below, which needs a reviewer CLI and says
+`PLAN NOT REVIEWED` without one. Everything else is unchanged.
 
 ## Phase 1: Scope & research (read-only)
 
@@ -86,21 +86,53 @@ if you don't want them tracked (or commit the good ones as design records — yo
 Skip this phase entirely unless `CODEX_REVIEW=true`.
 
 Have a second, independent model adversarially review the **spec, before any code exists** — a
-wrong approach is cheapest to catch here, before anything is built. This phase uses the optional
-[OpenAI Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc). **If the
-`codex:rescue` skill is not available in this session, say so in one line — "`--codex` requested,
-Codex plugin not installed, continuing without external review" — and go straight to Phase 3.
-Never fake a review.** Invoke it via `Skill(codex:rescue)` with `--fresh` as the first arg (skips
-the "continue previous Codex thread?" prompt), then the framing below. It routes through Codex as
-a generic `task`, so treat the output as a smart second opinion, not a verdict. Keep it read-only —
-the rescue agent can write files by default; the "no code yet" framing below is what holds it to
-review-only, so keep that explicit.
+wrong approach is cheapest to catch here, before anything is built. The reviewer is whatever
+`scripts/review-backend.sh` picks, the same one `/critical-review` uses: `REVIEWER` if set, else
+`REVIEW_CUSTOM_CMD`, else the Codex CLI if it is logged in, else the Claude Code CLI (models and
+codex effort pinned in `review-backend.conf`). It gets the spec and may read the files the spec
+cites, never write them: codex runs in its read-only sandbox, claude with Read/Grep/Glob only,
+gemini with no tools at all; a custom command is your own and runs as you. It answers in plain
+text. Treat it as a second opinion, not a verdict.
 
-> Review-only, do not edit any files. Adversarially review this DESIGN SPEC before implementation.
-> There is no code yet. Find: wrong or unstated assumptions, missing edge cases, a simpler approach
-> that gets the same outcome, hidden blast radius, and anything in the Verification plan that
-> wouldn't actually prove the goal. Be blunt. If the approach is sound, say so in one line — don't
-> invent problems.
+Put the spec path into `PLAN_FILE` as a single-quoted shell string (write a `'` inside the path as
+`'\''`), then run the block **with `run_in_background: true`** and act on
+its completion notice: a review at high effort takes minutes, longer than a foreground call is
+allowed to run. If the run is stopped before it finishes, that is `PLAN NOT REVIEWED (interrupted)`.
+
+```bash
+bash <<'PLANREVIEW'
+PLAN_FILE='<spec path from Phase 2>'
+RB="${CLAUDE_PLUGIN_ROOT}/scripts/review-backend.sh"
+[ -f "$RB" ] || RB="${REVIEW_BACKEND:-$HOME/claude-code-guardrails/scripts/review-backend.sh}"
+if [ -z "$PLAN_FILE" ]; then
+  echo "PLAN NOT REVIEWED: no spec path was filled in"
+  exit 0
+fi
+if [ ! -f "$RB" ]; then
+  echo "PLAN NOT REVIEWED: scripts/review-backend.sh not found — export REVIEW_BACKEND=<checkout>/scripts/review-backend.sh"
+  exit 0
+fi
+OUT=$(mktemp); ERR=$(mktemp)
+trap 'rm -f "$OUT" "$ERR"' EXIT
+bash "$RB" --spec "$PLAN_FILE" > "$OUT" 2> "$ERR"
+RC=$?
+if [ "$RC" -eq 0 ] && grep -q '[^[:space:]]' "$OUT"; then
+  echo "PLAN REVIEWED ($(sed -n 's/^review-backend: //p' "$ERR" | head -n 1)):"
+  cat "$OUT"
+else
+  echo "PLAN NOT REVIEWED (exit $RC):"
+  grep '^review-backend:' "$ERR"                      # the adapter's own reason first, never cut off
+  echo "── reviewer output (last 20 lines) ──"
+  grep -v '^review-backend:' "$ERR" | tail -n 20
+fi
+PLANREVIEW
+```
+
+**`PLAN NOT REVIEWED` means exactly that — never "no findings".** It is the answer for every exit
+other than 0: 3 = no reviewer on this machine, 4 = the reviewer ran and failed (or its codex run
+header did not show the read-only sandbox, the pinned model and effort), 1 = a usage problem such as
+an empty spec. Say it out loud and let the user decide whether to proceed unreviewed. Never review
+the spec yourself in its place.
 
 Then: fold legitimate findings into the spec, and surface anything that needs the user's call as an
 open question. Don't rubber-stamp — if the reviewer is wrong, say why. If it is right, the spec

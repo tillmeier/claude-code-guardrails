@@ -66,8 +66,8 @@ all_present() {
   run bash "$SC"
   [ "$status" -eq 0 ]
   has "✓ git: git version"; has "✓ python3: Python 3"
-  has "✓ /critical-review reviewer: codex gpt-6.2-sol (codex login checked)"
-  has "✓ Codex plugin for /plan --codex: enabled"
+  has "✓ reviewer (/critical-review, /plan --codex): codex gpt-6.2-sol (codex login checked)"
+  hasnt "Codex plugin"; hasnt "plugin list:"                                       # v0.8.0: no plugin check
   has "✓ node v22.12.0"; has "✓ Chrome 156.0.1.2 ("
   has "✓ browser server 'chrome-devtools' (isolated profile): MCP handshake ok, browser launch not tested"
   has "✓ browser server 'chrome-live' (attached to your running Chrome, --autoConnect): MCP handshake ok"
@@ -80,8 +80,8 @@ all_present() {
   with_git; with_python
   run bash "$SC"
   [ "$status" -eq 0 ]
-  has "✗ /critical-review reviewer: none usable"; has "→ npm i -g @openai/codex && codex login"
-  has "– Codex plugin: can't check without the claude CLI on PATH"
+  has "✗ reviewer (/critical-review, /plan --codex): none usable"; has "→ npm i -g @openai/codex && codex login"
+  has "– plugin list: can't read it without the claude CLI on PATH (plugin state unknown)"
   has "✗ node: not on PATH"; has "→ install Node 22.12 or newer from https://nodejs.org"
   has "✗ Chrome: not found"; has "→ install Google Chrome from https://www.google.com/chrome/"
   has "– browser MCP servers: can't list without the claude CLI on PATH"
@@ -92,19 +92,18 @@ all_present() {
   has "→ brew install node"
 }
 
-@test "setup-check: claude CLI as the only reviewer → 'login not checked'; plugin not installed → install hint" {
+@test "setup-check: claude CLI as the only reviewer → 'login not checked'; no Codex plugin is asked for" {
   with_git; with_python; with_claude
   run bash "$SC"
   [ "$status" -eq 0 ]
-  has "✓ /critical-review reviewer: claude CLI on PATH, claude-"; has "(login not checked)"
-  has "✗ Codex plugin for /plan --codex: not installed"
-  has "→ /plugin marketplace add openai/codex-plugin-cc"
+  has "✓ reviewer (/critical-review, /plan --codex): claude CLI on PATH, claude-"; has "(login not checked)"
+  hasnt "Codex plugin"; hasnt "codex-plugin-cc"
 }
 
 @test "setup-check: REVIEWER=gemini with agy → a working reviewer; without agy → the agy install hint" {
   all_present; fake agy 'exit 0'
   run env REVIEWER=gemini bash "$SC"
-  has "✓ /critical-review reviewer: gemini via agy, gemini-4-neon-high (sign-in not checked; code goes to Google)"
+  has "✓ reviewer (/critical-review, /plan --codex): gemini via agy, gemini-4-neon-high (sign-in not checked; code goes to Google)"
   rm "$FB/agy"
   run env REVIEWER=gemini bash "$SC"
   has "install the Antigravity CLI (agy)"
@@ -293,11 +292,11 @@ all_present() {
   with_git; with_python; with_claude
   printf '{"plugins":[]}\n' > "$FAKE_PLUGINS"
   run bash "$SC"
-  has "– Codex plugin: claude plugin list printed an unknown format, can't check"
-  printf '[{"name":"codex"}]\n' > "$FAKE_PLUGINS"
+  has "– plugin list: claude plugin list printed an unknown format, plugin state unknown"
+  printf '[{"name":"guardrails"}]\n' > "$FAKE_PLUGINS"
   run bash "$SC"
-  has "– Codex plugin: claude plugin list printed an unknown format"
-  hasnt "Codex plugin for /plan --codex: enabled"
+  has "– plugin list: claude plugin list printed an unknown format"
+  hasnt "plugin active"
 }
 
 @test "setup-check wiring: the command's shell block finds the script as a plugin (from another cwd) and by hand" {

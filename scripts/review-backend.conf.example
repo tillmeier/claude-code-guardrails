@@ -33,7 +33,10 @@ CLAUDE_REVIEW_MAX_TURNS=30
 # Custom reviewer: a command line run with `bash -c`. It receives the assembled prompt on stdin
 # and must print the review on stdout (JSON matching scripts/review-findings.schema.json, or
 # plain text). Non-zero exit = review failed. Environment available to it:
-#   REVIEW_SCOPE (working-tree | base), REVIEW_BASE (commit, or empty), REVIEW_REPO_ROOT,
-#   REVIEW_SCHEMA (path to the schema file), REVIEW_FOCUS (user focus text, or empty).
+#   REVIEW_SCOPE (working-tree | base | spec), REVIEW_BASE (commit, or empty), REVIEW_REPO_ROOT,
+#   REVIEW_SCHEMA (path to the schema file; EMPTY in spec mode), REVIEW_FOCUS (user focus text, or
+#   empty), REVIEW_SPEC (spec mode only: absolute path of the spec under review).
+# Spec mode (/plan --codex) wants a plain-text answer; a wrapper that insists on the schema fails
+# there, which /plan reports as PLAN NOT REVIEWED.
 # Example: REVIEW_CUSTOM_CMD='my-reviewer --schema "$REVIEW_SCHEMA"'
 REVIEW_CUSTOM_CMD=""

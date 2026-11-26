@@ -51,9 +51,8 @@ You need Claude Code ≥ 2.1, installed and logged in. Homebrew is optional.
    Skip the second server if you don't want an agent acting with your logins.
 5. **Optional extras:**
    - `/output-style Terse`.
-   - A reviewer for `/critical-review`: the Codex CLI (`npm i -g @openai/codex && codex login`) or
-     the Claude Code CLI.
-   - The [Codex plugin](https://github.com/openai/codex-plugin-cc) for `/plan --codex`.
+   - A reviewer for `/critical-review` and `/plan --codex`: the Codex CLI
+     (`npm i -g @openai/codex && codex login`) or the Claude Code CLI.
 6. **Restart, then run `/guardrails:setup-check` again.**
 
 If the same Mac also carries a hand-installed copy of these files (or a private config they came
@@ -137,7 +136,7 @@ Notes:
 
 | Command | Does |
 |---|---|
-| `/plan` | Short cited spec + verification plan before code; approval gate. `--codex` adds an external plan review (needs the optional [Codex plugin](https://github.com/openai/codex-plugin-cc), says so and continues without it) |
+| `/plan` | Short cited spec + verification plan before code; approval gate. `--codex` adds an external review of the spec by the same reviewer `/critical-review` uses (Codex by default); without one it prints `PLAN NOT REVIEWED` and continues |
 | `/implement` | Executes an agreed plan in small steps, verifies each, asks instead of guessing, halts on surprises |
 | `/verify` | Ship gate: drives the changed flow for real and emits PASS/FAIL/SKIP with evidence. `--ui` iterates over screenshots per breakpoint (needs a browser MCP, degrades without) |
 | `/critical-review` | Exit gate: an independent reviewer sees this session's diff (not the brief), you judge each finding against the code, approve the fixes once in plan mode. `--review-only` for findings in chat, `--adversarial` for the deeper prompt-mode pass, `--base`/`--since`/`--feature`/`--final` for wider scopes. Stops with a clear message when no reviewer is available — it never reviews its own work instead |
@@ -146,7 +145,7 @@ Notes:
 | `/cleanup-docs` | Doc audit: measure → verify → cut; token-greps every fact before removing text; reports in bytes |
 | `/refactor-claude-md` | Restructures CLAUDE.md into a lean core + on-demand tiers, no `@`-imports |
 | `/init-local-md` | Generates a gitignored `.claude/local.md` from detected environment |
-| `/setup-check` | What of this plugin is set up on this machine: git/python3, reviewer, Codex plugin, Node, Chrome, browser MCP servers, output style, hooks registered twice. ✓/✗ with the exact fix; installs nothing. Not named `doctor`, because Claude Code has a built-in `/doctor` |
+| `/setup-check` | What of this plugin is set up on this machine: git/python3, reviewer, Node, Chrome, browser MCP servers, output style, hooks registered twice. ✓/✗ with the exact fix; installs nothing. Not named `doctor`, because Claude Code has a built-in `/doctor` |
 
 The loop in practice: `docs/workflow-recipes.md`. Plan files land in `.claude/plans/`,
 gitignore them if you don't want them tracked.
@@ -163,10 +162,11 @@ it. It assumes the two servers from [Quick start](#quick-start-fresh-mac) step 4
 
 ## Reviewer backend
 
-`scripts/review-backend.sh` is the only vendor-specific piece behind `/critical-review`. It picks a
-reviewer, assembles the review input from git (the diff; for the working tree also untracked file
-bodies), runs the reviewer read-only and prints the review — plus one stderr line saying which
-backend, model and mode actually ran.
+`scripts/review-backend.sh` is the only vendor-specific piece behind `/critical-review` and
+`/plan --codex`. It picks a reviewer, assembles the review input from git (the diff; for the working
+tree also untracked file bodies) or, with `--spec <file>`, from a design spec, runs the reviewer
+read-only and prints the review — plus one stderr line saying which backend, model and mode
+actually ran.
 
 | `REVIEWER=` | Runs | Notes |
 |---|---|---|
@@ -184,7 +184,14 @@ explicitly but that is unavailable is also exit 3 — never a silent substitute.
 the real file is gitignored): a vendor default can be deprecated or unavailable on your account
 without warning. The codex reasoning effort is pinned the same way (`CODEX_REVIEW_EFFORT`, default
 `high`): the built-in reviewer takes no effort flag and the flagship's own default is low.
-Prompt-mode output follows `scripts/review-findings.schema.json`.
+Prompt-mode output follows `scripts/review-findings.schema.json`; a spec review is plain text.
+
+Spec mode (`--spec <file>`, used by `/plan --codex`) reviews a design before any code exists. A spec
+is intent, so it never goes next to a diff: `--spec` with `--scope`, `--base` or `--detect` is a
+usage error. codex and claude may read the files the spec cites; gemini judges from the spec alone.
+A codex spec review is accepted only when codex's own run header shows the read-only sandbox, the
+pinned model and effort. A custom command gets `REVIEW_SCOPE=spec` and `REVIEW_SPEC`, and an empty
+`REVIEW_SCHEMA`.
 
 Three helpers sit next to it, all plain bash/python3 and tested in `tests/review-tools.bats`:
 `scope-delta.sh` tells `/critical-review` which lines of each changed file are this session's (one
@@ -195,7 +202,7 @@ review log as immutable events (`run`, `finding`, `decision`, `resolution`, `bri
 (`CLAUDE_REVIEW_LOG_DIR` overrides); `critical-review-stats.py` reads it — distinct ids, undecided
 findings reported as unresolved, never guessed.
 
-The reviewer is deliberately given no way to receive the task brief: framing a change as intended or
+A code review is deliberately given no way to receive the task brief: framing a change as intended or
 bug-free collapses a reviewer's true-positive rate (arXiv 2603.18740). `/critical-review` writes the
 brief for itself and applies it only after the review, behind a mandatory re-read of the source.
 
@@ -209,6 +216,7 @@ bash scripts/review-backend.sh --detect                     # which reviewer wou
 bash scripts/review-backend.sh --base HEAD~3                # review the last three commits
 bash scripts/review-backend.sh --scope working-tree --focus "error handling in the retry path"
 bash scripts/review-backend.sh --print-prompt --base main   # show the prompt-mode input, run nothing
+bash scripts/review-backend.sh --spec .claude/plans/x.md    # review a design spec (what /plan --codex runs)
 ```
 
 ## Fleet sync
@@ -222,7 +230,7 @@ exit 2 on findings; `--dry-run` shows what would transfer.
 ## Tests
 
 ```bash
-bats tests/        # 113 tests: guard patterns, SQL guard, formatter, session marker, handoff + read-back, reviewer backend, review helpers, setup check, wiring
+bats tests/        # 146 tests: guard patterns, SQL guard, formatter, session marker, handoff + read-back, reviewer backend, spec review, review helpers, setup check, wiring
 ```
 
 CI runs the same suite on ubuntu and on macOS under `/bin/bash` 3.2, the primary target. The backend tests run
@@ -248,6 +256,8 @@ the reviewers found in this port are in [docs/review-backend.md](docs/review-bac
 ## Differences from my private copy
 
 - Absolute paths → `${CLAUDE_PLUGIN_ROOT}` / `$HOME`.
+- `plan.md --codex` reviews the spec through `scripts/review-backend.sh` (whichever reviewer is
+  configured); my copy runs `codex exec` directly.
 - `session-start.sh` keys the marker file by session id (`${CLAUDE_SESSION_ID}`) instead of an
   undocumented env-file export, and adds the dirty-file / blob snapshot.
 - `critical-review.md` calls `scripts/review-backend.sh` instead of the Codex plugin's companion

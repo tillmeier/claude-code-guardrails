@@ -78,6 +78,53 @@ comparison, 24-25.11.2026). Facts measured on agy 1.5.16:
 - **First real run (this port's v0.6.7 commit):** three real gaps in the new staging-guard tokenizer,
   fixed in the same release (comment with an apostrophe, `$(…)` as a redirect target, a quoted `#`).
 
+## v0.8.0: spec review for /plan --codex
+
+`/plan --codex` used `Skill(codex:rescue)`: held to review-only by prompt wording, model and effort
+from each host's `~/.codex/config.toml`, and it needed the Codex plugin. It now runs
+`review-backend.sh --spec <file>`, the adapter `/critical-review` uses. The spec was itself reviewed by
+Codex before any code existed; its six points shaped the following.
+
+- **The no-brief rule still holds.** A spec is intent. Spec mode never takes a diff: `--spec` with
+  `--scope`, `--base`, `--detect` or `--mode native` is exit 1. The rule is now "never intent next to
+  a diff", which is what the arXiv result is about.
+- **Plain text, no findings schema:** a spec has no diff lines to cite. Every backend fails an empty or
+  whitespace-only answer (exit 4); before v0.8.0 `-s` let whitespace through, in code review too.
+- **Read-only, stated per backend:** codex runs in its read-only sandbox with `--disable hooks` (an
+  enabled, trusted codex hook runs outside the sandbox), and the answer counts only if codex's own run
+  header — the block between the first two `--------` lines, not the transcript that echoes the spec —
+  shows `sandbox: read-only`, the requested model and the pinned effort (the status line only echoes
+  what was asked for). claude gets Read/Grep/Glob only. gemini has no tools,
+  so it judges from the spec alone, and a content-filter refusal (status SUCCESS with prose) is caught
+  by its wording because the answer is no longer JSON. A custom command is the user's own and runs
+  with the user's rights. MCP servers configured in `~/.codex/config.toml` are a separate surface, as
+  in code review; `/critical-review`'s codex runs keep hooks enabled as before (unchanged in v0.8.0).
+- **The spec is validated before any backend is looked up:** a regular readable file, no symlink,
+  non-empty, at most 200,000 bytes, resolved to an absolute path before the reviewer runs from the
+  repository root (or the current directory outside a repo, with `--skip-git-repo-check` for codex).
+  Its text is appended with `cat`, so `$(…)` and backticks in it never run.
+- **Timeout belongs to the caller:** `/plan` runs the adapter in the background and acts on the
+  completion notice. A review at high effort takes minutes, and gemini's own limit is 900 s, longer
+  than a foreground tool call. Every exit other than 0 is `PLAN NOT REVIEWED`.
+- **Rejected:** copying the private `codex exec` block (a second vendor-specific file) and a separate
+  `plan-review.sh` (it would duplicate every launcher).
+- **Known gap, not fixed here:** a repository that tracks `.claude/plans/` sends plan text into
+  `/critical-review`'s ordinary diff. This repository ignores the directory.
+- **The release review (Codex on the working tree) found six holes, all fixed before release:** an
+  empty `--spec ""` fell through to a review of the whole dirty tree, which `/plan` would have shown as
+  `PLAN REVIEWED`; codex hooks run outside the sandbox (now `--disable hooks`); the header check read
+  the whole transcript, where the echoed spec could satisfy it; a path with an apostrophe broke
+  `PLAN_FILE='…'`; `CDPATH` leaked into the resolved path; `tail -n 20` cut off the adapter's reason.
+- **Verified live (2026-11-26):** codex read the cited file (named the value only that file holds) with
+  the header showing read-only / gpt-6.2-sol / high; claude haiku, nested in a session, quoted the cited
+  line; `/guardrails:plan --codex` through `claude -p --plugin-dir` printed `PLAN REVIEWED`, and with a
+  failing custom reviewer `PLAN NOT REVIEWED (exit 4)`. A write probe was refused by codex itself, so it
+  shows no write happened, not that the sandbox blocks one.
+- **Headless `claude -p`:** Phase 2.5 is a Bash call. Without `--allowedTools "Bash(bash:*)"` the harness
+  refuses it and `/plan` reports `PLAN NOT REVIEWED` (measured; it did not fake a review). In
+  `acceptEdits` mode a write to `.claude/plans/` is refused as a sensitive file, so the spec lands
+  elsewhere; Phase 2.5 takes whatever path the model fills in.
+
 ## v0.3.0: scope helper and event log
 
 - **Scope classification is a shipped script** (`scripts/scope-delta.sh`), not an inline block the

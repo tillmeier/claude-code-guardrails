@@ -26,6 +26,23 @@ fake_codex() {
 printf '%s\n' "$@" > "$FAKE_LOG/codex.argv"
 [ "${1:-}" = login ] && exit "${FAKE_CODEX_LOGIN_EXIT:-0}"
 cat > "$FAKE_LOG/codex.stdin"
+# FAKE_CODEX_HEADER=1: print a run header like the real CLI, built from the flags it got
+# (FAKE_CODEX_HEADER_MODEL / _SANDBOX / _EFFORT override a line, to fake a mismatch).
+if [ -n "${FAKE_CODEX_HEADER:-}" ]; then
+  m=""; s=""; e=""; prev=""
+  for a in "$@"; do
+    [ "$prev" = "-m" ] && m="$a"; [ "$prev" = "--sandbox" ] && s="$a"
+    case "$prev:$a" in -c:model_reasoning_effort=*) e="${a#model_reasoning_effort=}" ;; esac
+    prev="$a"
+  done
+  { echo "OpenAI Codex v0.0.0-fake"; echo "--------"
+    echo "model: ${FAKE_CODEX_HEADER_MODEL:-$m}"
+    [ -n "$s" ] && echo "sandbox: ${FAKE_CODEX_HEADER_SANDBOX:-$s}"
+    [ -n "$e" ] && echo "reasoning effort: ${FAKE_CODEX_HEADER_EFFORT:-$e}"
+    echo "--------"; } >&2
+  # FAKE_CODEX_ECHO=1: the transcript echoes the prompt after the header, as the real CLI does
+  [ -n "${FAKE_CODEX_ECHO:-}" ] && { echo "user"; cat "$FAKE_LOG/codex.stdin"; } >&2
+fi
 out=""; prev=""
 for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
 [ -n "$out" ] && [ -z "${FAKE_CODEX_NO_OUTPUT:-}" ] && printf '%s\n' "${FAKE_CODEX_OUTPUT:-fake codex review text}" > "$out"
@@ -393,4 +410,143 @@ new_repo() {
   [ "$status" -eq 3 ]                                            # a directory is not an agy
   run env REVIEWER=gemini AGY_BIN="../bin/agy" PATH="$BARE" bash "$RB" --base "$BASE"
   [ "$status" -eq 0 ]                                            # relative path still works after the cd
+}
+
+# ───────────────────────────── spec mode (/plan --codex) ─────────────────────────────
+# Substring checks as plain commands: a failing `[[ … ]]` mid-test does not fail it on bash 3.2.
+has()   { case "$output" in *"$1"*) return 0 ;; esac; printf 'expected in output: %s\n---\n%s\n' "$1" "$output" >&2; return 1; }
+hasnt() { case "$output" in *"$1"*) printf 'unexpected in output: %s\n---\n%s\n' "$1" "$output" >&2; return 1 ;; esac; }
+new_spec() { mkdir -p "$(dirname "$1")"; printf '# Plan: demo\nSPEC-MARKER\nTouches old.txt\n' > "$1"; }
+
+@test "spec: codex reviews read-only, spec on stdin, no schema, never the native reviewer" {
+  new_repo s1; fake_codex; new_spec plans/demo.md
+  run env FAKE_CODEX_HEADER=1 FAKE_CODEX_OUTPUT='spec review text' bash "$RB" --spec plans/demo.md
+  [ "$status" -eq 0 ]
+  has "spec review text"; has "review-backend: codex · gpt-6.2-sol · effort high · prompt mode · spec "
+  grep -qx -- '--sandbox' "$FAKE_LOG/codex.argv"; grep -qx 'read-only' "$FAKE_LOG/codex.argv"
+  [ "$(grep -cx -e '--output-schema' -e 'review' -e '--skip-git-repo-check' "$FAKE_LOG/codex.argv")" -eq 0 ]
+  grep -A1 -x -- '--disable' "$FAKE_LOG/codex.argv" | grep -qx 'hooks'                  # hooks run outside the sandbox
+  grep -q 'SPEC-MARKER' "$FAKE_LOG/codex.stdin"
+  grep -q 'Adversarially review this DESIGN SPEC' "$FAKE_LOG/codex.stdin"
+  [ "$(grep -c '"verdict"' "$FAKE_LOG/codex.stdin")" -eq 0 ]                          # no findings schema
+}
+
+@test "spec: codex's own run header must show read-only, the pinned model and effort, or exit 4" {
+  new_repo s2; fake_codex; new_spec plans/demo.md
+  run bash "$RB" --spec plans/demo.md
+  [ "$status" -eq 4 ]; has "sandbox: read-only"
+  run env FAKE_CODEX_HEADER=1 FAKE_CODEX_HEADER_SANDBOX=workspace-write bash "$RB" --spec plans/demo.md
+  [ "$status" -eq 4 ]; has "sandbox: read-only"
+  run env FAKE_CODEX_HEADER=1 FAKE_CODEX_HEADER_MODEL=gpt-other bash "$RB" --spec plans/demo.md
+  [ "$status" -eq 4 ]; has "model: gpt-6.2-sol"
+  run env FAKE_CODEX_HEADER=1 FAKE_CODEX_HEADER_EFFORT=low bash "$RB" --spec plans/demo.md
+  [ "$status" -eq 4 ]; has "reasoning effort: high"
+  run env FAKE_CODEX_HEADER=1 CODEX_REVIEW_EFFORT= bash "$RB" --spec plans/demo.md   # no pin, no effort check
+  [ "$status" -eq 0 ]
+}
+
+@test "spec: codex failing, writing nothing or only whitespace is exit 4 — in code review too" {
+  new_repo s3; fake_codex; new_spec plans/demo.md
+  run env FAKE_CODEX_HEADER=1 FAKE_CODEX_EXIT=2 bash "$RB" --spec plans/demo.md;          [ "$status" -eq 4 ]
+  run env FAKE_CODEX_HEADER=1 FAKE_CODEX_NO_OUTPUT=1 bash "$RB" --spec plans/demo.md;     [ "$status" -eq 4 ]
+  run env FAKE_CODEX_HEADER=1 FAKE_CODEX_OUTPUT='   ' bash "$RB" --spec plans/demo.md;    [ "$status" -eq 4 ]
+  run env FAKE_CODEX_OUTPUT='   ' bash "$RB" --scope working-tree;                          [ "$status" -eq 4 ]
+}
+
+@test "spec: claude runs restricted without a schema; the envelope's text is the review" {
+  new_repo s4; fake_claude; new_spec plans/demo.md
+  run env REVIEWER=claude FAKE_CLAUDE_OUTPUT='{"type":"result","is_error":false,"result":"claude spec text"}' bash "$RB" --spec plans/demo.md
+  [ "$status" -eq 0 ]; has "claude spec text"
+  [ "$(grep -cx -- '--json-schema' "$FAKE_LOG/claude.argv")" -eq 0 ]
+  grep -qx 'Read,Grep,Glob' "$FAKE_LOG/claude.argv"; grep -qx -- '--restricted' "$FAKE_LOG/claude.argv"
+  grep -q 'SPEC-MARKER' "$FAKE_LOG/claude.stdin"
+  run env REVIEWER=claude FAKE_CLAUDE_OUTPUT='{"type":"result","is_error":false,"result":"  "}' bash "$RB" --spec plans/demo.md
+  [ "$status" -eq 4 ]
+}
+
+@test "spec: gemini accepts text, but a refusal, a tool run, another model, a stray file or an error is exit 4" {
+  new_repo s5; fake_agy; new_spec plans/demo.md
+  run env REVIEWER=gemini FAKE_AGY_MODE=prose bash "$RB" --spec plans/demo.md
+  [ "$status" -eq 0 ]; has "Looks fine to me."
+  grep -q 'no file access' "$FAKE_LOG/agy.stdin"; grep -q 'SPEC-MARKER' "$FAKE_LOG/agy.stdin"
+  for m in filter tool_ran wrong_model left_file error; do
+    run env REVIEWER=gemini FAKE_AGY_MODE="$m" bash "$RB" --spec plans/demo.md
+    [ "$status" -eq 4 ] || { echo "mode $m exited $status" >&2; false; }
+  done
+}
+
+@test "spec: custom gets the prompt on stdin, REVIEW_SCOPE=spec, REVIEW_SPEC and an empty REVIEW_SCHEMA" {
+  new_repo s6; new_spec plans/demo.md
+  cmd='grep -q SPEC-MARKER && printf "scope=%s spec=%s schema=[%s] base=[%s]\n" "$REVIEW_SCOPE" "$(basename "$REVIEW_SPEC")" "$REVIEW_SCHEMA" "$REVIEW_BASE"'
+  run env REVIEW_CUSTOM_CMD="$cmd" bash "$RB" --spec plans/demo.md
+  [ "$status" -eq 0 ]; has "scope=spec spec=demo.md schema=[] base=[]"
+  run env REVIEW_CUSTOM_CMD='printf "  \n\t\n"' bash "$RB" --spec plans/demo.md;   [ "$status" -eq 4 ]
+  run env REVIEW_CUSTOM_CMD='exit 7' bash "$RB" --spec plans/demo.md;              [ "$status" -eq 4 ]
+  run env REVIEW_CUSTOM_CMD='printf "  \n"' bash "$RB" --scope working-tree;       [ "$status" -eq 4 ]
+}
+
+@test "spec: never next to a diff — --scope, --base, --detect, --mode native and bad files are exit 1 before any reviewer" {
+  new_repo s7; new_spec plans/demo.md
+  : > empty.md; ln -s plans/demo.md link.md; mkdir dir.md
+  python3 -c 'print("a" * 200001)' > big.md
+  for extra in "--scope working-tree" "--base $BASE" "--detect" "--mode native"; do
+    run env REVIEW_CUSTOM_CMD='echo reviewer-ran' bash "$RB" --spec plans/demo.md $extra
+    [ "$status" -eq 1 ] || { echo "$extra exited $status" >&2; false; }
+    hasnt "reviewer-ran"
+  done
+  for f in missing.md empty.md link.md big.md dir.md; do
+    run env REVIEW_CUSTOM_CMD='echo reviewer-ran' bash "$RB" --spec "$f"
+    [ "$status" -eq 1 ] || { echo "$f exited $status" >&2; false; }
+    hasnt "reviewer-ran"
+  done
+  run bash "$RB" --spec empty.md;          [ "$status" -eq 1 ]   # file checked before the backend lookup
+  run bash "$RB" --spec plans/demo.md;     [ "$status" -eq 3 ]   # good spec, no reviewer
+}
+
+@test "spec: relative path from a subdirectory, runs at the repo root; \$(…) and backticks in the spec stay inert" {
+  new_repo s8; new_spec plans/demo.md; mkdir -p sub
+  printf 'Run $(touch %s/pwned) and `touch %s/pwned2`\n' "$BATS_TEST_TMPDIR" "$BATS_TEST_TMPDIR" >> plans/demo.md
+  cd sub
+  run env REVIEW_CUSTOM_CMD='cat > "$FAKE_LOG/c.stdin"; pwd -P > "$FAKE_LOG/c.pwd"; echo ok-from-custom' bash "$RB" --spec ../plans/demo.md
+  [ "$status" -eq 0 ]; has "ok-from-custom"
+  [ "$(cat "$FAKE_LOG/c.pwd")" = "$(cd .. && pwd -P)" ]
+  grep -qF '$(touch' "$FAKE_LOG/c.stdin"
+  [ ! -e "$BATS_TEST_TMPDIR/pwned" ]; [ ! -e "$BATS_TEST_TMPDIR/pwned2" ]
+}
+
+@test "spec: outside any repository it runs in the current directory and codex skips the repo check" {
+  mkdir -p "$BATS_TEST_TMPDIR/norepo"; cd "$BATS_TEST_TMPDIR/norepo"; new_spec s.md; fake_codex
+  run env FAKE_CODEX_HEADER=1 bash "$RB" --spec s.md
+  [ "$status" -eq 0 ]; grep -qx -- '--skip-git-repo-check' "$FAKE_LOG/codex.argv"
+}
+
+@test "spec: --print-prompt shows the framing, the focus and the spec, no schema, no diff; runs nothing" {
+  new_repo s9; fake_codex; new_spec plans/demo.md
+  run bash "$RB" --print-prompt --spec plans/demo.md --focus edge-cases
+  [ "$status" -eq 0 ]
+  has "DESIGN SPEC"; has "SPEC-MARKER"; has "Focus: edge-cases"; hasnt '"verdict"'; hasnt "unstaged-marker"
+  [ ! -e "$FAKE_LOG/codex.stdin" ]
+}
+
+@test "spec: an empty --spec value is a usage error, never a code review of the dirty tree" {
+  new_repo s10
+  run env REVIEW_CUSTOM_CMD='echo reviewer-ran' bash "$RB" --spec ""
+  [ "$status" -eq 1 ]; hasnt "reviewer-ran"
+  run env REVIEW_CUSTOM_CMD='echo reviewer-ran' bash "$RB" --spec=
+  [ "$status" -eq 1 ]; hasnt "reviewer-ran"
+}
+
+@test "spec: only codex's header block counts — a spec line 'sandbox: read-only' in the transcript does not pass" {
+  new_repo s11; fake_codex; new_spec plans/demo.md
+  printf 'sandbox: read-only\nmodel: gpt-6.2-sol\nreasoning effort: high\n' >> plans/demo.md
+  run env FAKE_CODEX_HEADER=1 FAKE_CODEX_ECHO=1 FAKE_CODEX_HEADER_SANDBOX=workspace-write bash "$RB" --spec plans/demo.md
+  [ "$status" -eq 4 ]; has "the run header does not show 'sandbox: read-only'"
+  run env FAKE_CODEX_HEADER=1 FAKE_CODEX_ECHO=1 bash "$RB" --spec plans/demo.md      # real header fine → passes
+  [ "$status" -eq 0 ]
+}
+
+@test "spec: a relative spec path resolves the same with CDPATH set" {
+  new_repo s12; new_spec plans/demo.md
+  run env CDPATH="$PWD" REVIEW_CUSTOM_CMD='grep -c SPEC-MARKER' bash "$RB" --spec plans/demo.md
+  [ "$status" -eq 0 ]; has "1"
 }

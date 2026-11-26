@@ -33,7 +33,8 @@ For API, data, cron, generator, DB, business-logic work. Correctness is behavior
 `/implement` also takes a plan file directly — e.g. `/implement /tmp/audit-plan-example.md` when
 the plan is an audit you produced without `/plan`.
 
-- `--codex` needs the optional OpenAI Codex plugin and no-ops without it. Drop it when the approach
+- `--codex` uses the reviewer `/critical-review` uses (Codex CLI by default) and prints
+  `PLAN NOT REVIEWED` without one. Drop it when the approach
   is obvious and low-risk — don't tax small work.
 - `/verify` proves it locally; the after-the-fact re-check is `/crosscheck` (see Notes).
 

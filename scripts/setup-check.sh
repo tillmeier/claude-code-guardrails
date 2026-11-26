@@ -128,8 +128,8 @@ if [ $HAVE_PY -eq 1 ]; then
   VERSION=$(py 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/.claude-plugin/plugin.json") || VERSION="?"
 fi
 
-# Plugin list once: is the Codex plugin / guardrails itself enabled?
-PL_STATE="no-claude"; CODEX_ON=0; GUARD_ON=0
+# Plugin list once: is guardrails itself enabled as a plugin?
+PL_STATE="no-claude"; GUARD_ON=0
 if [ $HAVE_CLAUDE -eq 1 ]; then
   run_bounded plugins claude plugin list --json; rc=$?
   if [ $rc -eq 124 ]; then PL_STATE="timeout"
@@ -144,9 +144,9 @@ try:
 except Exception:
     print("bad"); sys.exit()
 on = lambda p: int(any(e["id"].startswith(p) and e["enabled"] for e in d))
-print("ok %d %d" % (on("codex@"), on("guardrails@")))' "$TMP/plugins")
+print("ok %d" % on("guardrails@"))' "$TMP/plugins")
     case "$r" in
-      "ok "*) PL_STATE="ok"; set -- $r; CODEX_ON=$2; GUARD_ON=$3 ;;
+      "ok "*) PL_STATE="ok"; GUARD_ON="${r#ok }" ;;
       *) PL_STATE="bad" ;;
     esac
   fi
@@ -165,7 +165,7 @@ done <<EOF
 $REQ_OUT
 EOF
 
-# ── 2. reviewer and Codex plugin ─────────────────────────────────────────────────────────────────
+# ── 2. reviewer and plugin list ──────────────────────────────────────────────────────────────────
 echo
 echo "Reviewer and plugins"
 if [ -f "$SD/review-backend.sh" ]; then
@@ -173,34 +173,33 @@ if [ -f "$SD/review-backend.sh" ]; then
   if [ $rc -eq 0 ]; then
     read -r RB_BACKEND RB_MODEL < "$TMP/detect" || true
     case "${RB_BACKEND:-}" in
-      codex)  ok "/critical-review reviewer: codex ${RB_MODEL:-} (codex login checked)" ;;
-      claude) ok "/critical-review reviewer: claude CLI on PATH${RB_MODEL:+, $RB_MODEL} (login not checked)" ;;
-      custom) ok "/critical-review reviewer: custom command configured (not run)" ;;
-      gemini) ok "/critical-review reviewer: gemini via agy${RB_MODEL:+, $RB_MODEL} (sign-in not checked; code goes to Google)" ;;
-      *)      miss "/critical-review reviewer: unexpected answer from review-backend.sh --detect: $(first_line "$TMP/detect")" ;;
+      codex)  ok "reviewer (/critical-review, /plan --codex): codex ${RB_MODEL:-} (codex login checked)" ;;
+      claude) ok "reviewer (/critical-review, /plan --codex): claude CLI on PATH${RB_MODEL:+, $RB_MODEL} (login not checked)" ;;
+      custom) ok "reviewer (/critical-review, /plan --codex): custom command configured (not run)" ;;
+      gemini) ok "reviewer (/critical-review, /plan --codex): gemini via agy${RB_MODEL:+, $RB_MODEL} (sign-in not checked; code goes to Google)" ;;
+      *)      miss "reviewer (/critical-review, /plan --codex): unexpected answer from review-backend.sh --detect: $(first_line "$TMP/detect")" ;;
     esac
   elif [ $rc -eq 3 ]; then
-    miss "/critical-review reviewer: none usable — $(sed -n 's/^review-backend: //p' "$TMP/detect.err" | head -1 | cut -c1-200)" \
+    miss "reviewer (/critical-review, /plan --codex): none usable — $(sed -n 's/^review-backend: //p' "$TMP/detect.err" | head -1 | cut -c1-200)" \
       "$(if grep -q 'REVIEWER=gemini' "$TMP/detect.err" 2>/dev/null; then echo 'install the Antigravity CLI (agy) and sign in, or set AGY_BIN'; else echo 'npm i -g @openai/codex && codex login   (or install the Claude Code CLI)'; fi)"
   elif [ $rc -eq 124 ]; then
-    miss "/critical-review reviewer: review-backend.sh --detect timed out after ${LIMIT}s"
+    miss "reviewer (/critical-review, /plan --codex): review-backend.sh --detect timed out after ${LIMIT}s"
   else
-    miss "/critical-review reviewer: review-backend.sh --detect exited $rc: $(first_line "$TMP/detect.err")"
+    miss "reviewer (/critical-review, /plan --codex): review-backend.sh --detect exited $rc: $(first_line "$TMP/detect.err")"
   fi
 else
-  miss "/critical-review reviewer: $SD/review-backend.sh not found"
+  miss "reviewer (/critical-review, /plan --codex): $SD/review-backend.sh not found"
 fi
 
+# /plan --codex goes through review-backend.sh like /critical-review (v0.8.0): no Codex plugin needed.
+# The plugin list only decides "plugin active" in the header line; say when that could not be read.
 case "$PL_STATE" in
-  ok) if [ "$CODEX_ON" = 1 ]; then ok "Codex plugin for /plan --codex: enabled"
-      else miss "Codex plugin for /plan --codex: not installed (/plan works without it)" \
-        "/plugin marketplace add openai/codex-plugin-cc
-then /plugin install codex@openai-codex   (type both in Claude Code)"; fi ;;
-  no-claude) info "Codex plugin: can't check without the claude CLI on PATH" "/plugin in Claude Code" ;;
-  timeout)   miss "Codex plugin: claude plugin list timed out after ${LIMIT}s" ;;
-  failed:*)  miss "Codex plugin: claude plugin list exited ${PL_STATE#failed:}: $(first_line "$TMP/plugins.err")" ;;
-  no-python) info "Codex plugin: can't parse claude plugin list without python3" ;;
-  *)         info "Codex plugin: claude plugin list printed an unknown format, can't check" "/plugin in Claude Code" ;;
+  ok) ;;
+  no-claude) info "plugin list: can't read it without the claude CLI on PATH (plugin state unknown)" "/plugin in Claude Code" ;;
+  timeout)   miss "plugin list: claude plugin list timed out after ${LIMIT}s" ;;
+  failed:*)  miss "plugin list: claude plugin list exited ${PL_STATE#failed:}: $(first_line "$TMP/plugins.err")" ;;
+  no-python) info "plugin list: can't parse claude plugin list without python3" ;;
+  *)         info "plugin list: claude plugin list printed an unknown format, plugin state unknown" "/plugin in Claude Code" ;;
 esac
 
 # ── 3. browser: Node, Chrome, MCP servers ────────────────────────────────────────────────────────

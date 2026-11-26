@@ -55,15 +55,16 @@ root-level `CLAUDE.md` is not loaded for plugin users and trips `claude plugin v
 - Never put `$` followed by a digit inside a shell block in a `commands/*.md` file: the harness
   substitutes positional arguments there before the model sees it. Use `length()`, `NF`, sed
   groups.
-- Commands must degrade explicitly when an optional dependency is absent (`--codex` without the
-  Codex plugin, `--ui` without a browser MCP): say so and continue, never pretend.
+- Commands must degrade explicitly when an optional dependency is absent (`--codex` without a
+  reviewer CLI, `--ui` without a browser MCP): say so and continue, never pretend.
 - `commands/verify.md` and `commands/critical-review.md` read the session files
   `${TMPDIR:-/tmp}/claude-session-start-{commit,dirty,blobs}-${CLAUDE_SESSION_ID}` written by
   `hooks/session-start.sh`; keep the three in sync. `${CLAUDE_SESSION_ID}` and
   `${CLAUDE_PLUGIN_ROOT}` are substituted into command text by the harness — they are NOT
   environment variables inside Bash calls, so pass them as arguments to anything that needs them.
-- `scripts/review-backend.sh` is the only vendor-specific file: it must never take the brief or any
-  intent as input, never run a backend other than the one named, and never exit 0 without a review.
+- `scripts/review-backend.sh` is the only vendor-specific file: a code review must never get the
+  brief or any intent next to the diff (spec mode, `--spec`, is the one intent input and never takes a
+  diff), it never runs a backend other than the one named, and never exits 0 without a review.
   Backend tests use fake `codex`/`claude` executables on PATH — no model calls in `tests/`. Design
   decisions, CLI gotchas and measured timings: `docs/review-backend.md`.
 
